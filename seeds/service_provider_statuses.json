@@ -1,0 +1,6 @@
+[
+  { "name": "ACTIVE", "label": "Active", "description": "Tenant is fully operational.", "is_active": true },
+  { "name": "SUSPENDED", "label": "Suspended", "description": "Tenant access is temporarily suspended.", "is_active": true },
+  { "name": "ONBOARDING", "label": "Onboarding", "description": "Tenant is being provisioned and is not yet live.", "is_active": true },
+  { "name": "DEACTIVATED", "label": "Deactivated", "description": "Tenant has been permanently deactivated.", "is_active": true }
+]

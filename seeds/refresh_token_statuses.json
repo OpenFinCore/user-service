@@ -1,0 +1,6 @@
+[
+  { "name": "ACTIVE", "label": "Active", "description": "Refresh token is valid and unused.", "is_active": true },
+  { "name": "ROTATED", "label": "Rotated", "description": "Refresh token was exchanged and replaced by a new one.", "is_active": true },
+  { "name": "REVOKED", "label": "Revoked", "description": "Refresh token was explicitly revoked.", "is_active": true },
+  { "name": "EXPIRED", "label": "Expired", "description": "Refresh token has passed its expiry time.", "is_active": true }
+]

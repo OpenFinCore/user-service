@@ -1,0 +1,30 @@
+{
+  "logger": {
+    "level": "info",
+    "path": "./conf/logs/ofc-user-service",
+    "name": "ofc-user-service.log",
+    "maxSize": 50,
+    "rotationtime": 1440,
+    "secretKeys": ["password", "password_hash", "token_hash"],
+    "encoderConfig": {
+      "messageKey": "message",
+      "levelKey": "level",
+      "timeKey": "time"
+    },
+    "isEnabled": true
+  },
+  "postgreDataSource": {
+    "driverName": "postgres",
+    "addr": "127.0.0.1",
+    "port": "5432",
+    "database": "ofc_user_service",
+    "user": "postgres",
+    "password": "",
+    "sslMode": "disable",
+    "enableAutoMigrate": true
+  },
+  "seed": {
+    "dir": "./seeds"
+  },
+  "stage": "development"
+}

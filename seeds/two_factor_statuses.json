@@ -1,0 +1,5 @@
+[
+  { "name": "DISABLED", "label": "Disabled", "description": "Two-factor authentication is not enabled.", "is_active": true },
+  { "name": "PENDING", "label": "Pending", "description": "Two-factor authentication setup has started but is not confirmed.", "is_active": true },
+  { "name": "ENABLED", "label": "Enabled", "description": "Two-factor authentication is enabled and enforced.", "is_active": true }
+]

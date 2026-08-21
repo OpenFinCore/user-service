@@ -1,0 +1,4 @@
+[
+  { "name": "ACTIVE", "label": "Active", "description": "User type is available for assignment.", "is_active": true },
+  { "name": "INACTIVE", "label": "Inactive", "description": "User type is disabled and cannot be assigned.", "is_active": true }
+]

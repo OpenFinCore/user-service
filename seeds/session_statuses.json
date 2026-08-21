@@ -1,0 +1,5 @@
+[
+  { "name": "ACTIVE", "label": "Active", "description": "Session is valid and in use.", "is_active": true },
+  { "name": "EXPIRED", "label": "Expired", "description": "Session has passed its expiry time.", "is_active": true },
+  { "name": "REVOKED", "label": "Revoked", "description": "Session was explicitly revoked before expiry.", "is_active": true }
+]

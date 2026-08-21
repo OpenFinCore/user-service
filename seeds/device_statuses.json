@@ -1,0 +1,5 @@
+[
+  { "name": "ACTIVE", "label": "Active", "description": "Device is trusted and active.", "is_active": true },
+  { "name": "BLOCKED", "label": "Blocked", "description": "Device has been blocked from authenticating.", "is_active": true },
+  { "name": "REVOKED", "label": "Revoked", "description": "Device access has been revoked by the user or an administrator.", "is_active": true }
+]

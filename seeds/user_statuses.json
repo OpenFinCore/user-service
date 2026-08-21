@@ -1,0 +1,7 @@
+[
+  { "name": "INVITED", "label": "Invited", "description": "User has been invited but has not completed registration.", "is_active": true },
+  { "name": "ACTIVE", "label": "Active", "description": "User can authenticate and use the platform.", "is_active": true },
+  { "name": "LOCKED", "label": "Locked", "description": "User is temporarily locked out, e.g. after failed logins.", "is_active": true },
+  { "name": "SUSPENDED", "label": "Suspended", "description": "User access has been suspended by an administrator.", "is_active": true },
+  { "name": "DEACTIVATED", "label": "Deactivated", "description": "User account has been permanently deactivated.", "is_active": true }
+]
