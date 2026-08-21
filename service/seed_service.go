@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"bitbucket.org/smartfusion_code/sa-permissions-registery/auth/permission"
+	"github.com/OpenFinCore/permissions-package/auth/permission"
 
 	"ofc-user-service/conf"
 	c "ofc-user-service/context"
@@ -119,7 +119,7 @@ func (s *seedsService) SeedAll() (err error) {
 }
 
 // seedPermissions seeds the `permissions` table from
-// bitbucket.org/smartfusion_code/sa-permissions-registery, the single
+// github.com/OpenFinCore/permissions-package, the single
 // cross-service source of truth for what permissions exist and what they
 // mean. Permission codes (Definition.Code) are globally unique and
 // immutable per that package's governance rules, so they are stored in
@@ -136,7 +136,7 @@ func (s *seedsService) seedPermissions(ctx c.Context) error {
 	sum := md5.Sum(data)
 	hash := hex.EncodeToString(sum[:])
 
-	const registryKey = "sa-permissions-registery"
+	const registryKey = "github.com/OpenFinCore/permissions-package"
 	registry, err := s.store.GetSeedRegistryByFileName(ctx, registryKey)
 	if err != nil {
 		return err

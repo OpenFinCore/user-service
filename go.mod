@@ -3,7 +3,7 @@ module ofc-user-service
 go 1.25.0
 
 require (
-	bitbucket.org/smartfusion_code/sa-permissions-registery v0.0.0
+	github.com/OpenFinCore/permissions-package v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
 	go.uber.org/zap v1.27.0
@@ -28,4 +28,4 @@ require (
 	gorm.io/driver/mysql v1.5.6 // indirect
 )
 
-replace bitbucket.org/smartfusion_code/sa-permissions-registery => ../permissions
+replace github.com/OpenFinCore/permissions-package => ../permissions
