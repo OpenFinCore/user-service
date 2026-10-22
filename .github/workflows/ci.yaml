@@ -1,3 +1,4 @@
+```yaml
 name: CI
 
 on:
@@ -8,69 +9,110 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    name: test
+    name: Build and Test
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    permissions:
+      contents: read
 
-      - uses: actions/setup-go@v5
+    steps:
+      - name: Checkout user-service
+        uses: actions/checkout@v4
+
+      - name: Checkout permissions package
+        uses: actions/checkout@v4
         with:
-          go-version-file: go.mod   
+          repository: OpenFinCore/permissions-package
+          path: permissions
+          token: ${{ secrets.SIBLING_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
           cache: true
 
       - name: Download dependencies
         run: go mod download
 
+      - name: Verify dependencies
+        run: go mod verify
+
       - name: Build
         run: go build ./...
 
-      - name: Run tests (with race detector + coverage)
+      - name: Run tests with race detector and coverage
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage
           path: coverage.out
+          if-no-files-found: ignore
+          retention-days: 7
 
   review:
-    name: review
+    name: Code Quality and Security
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    permissions:
+      contents: read
 
-      - uses: actions/setup-go@v5
+    steps:
+      - name: Checkout user-service
+        uses: actions/checkout@v4
+
+      - name: Checkout permissions package
+        uses: actions/checkout@v4
+        with:
+          repository: OpenFinCore/permissions-package
+          path: permissions
+          token: ${{ secrets.SIBLING_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Check go.mod / go.sum are tidy
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Check module files are tidy
         run: |
           go mod tidy
-          git diff --exit-code go.mod go.sum
+          git diff --exit-code -- go.mod go.sum
 
-      - name: Check formatting (gofmt)
+      - name: Check formatting
         run: |
           out=$(gofmt -l .)
           if [ -n "$out" ]; then
-            echo "These files are not gofmt-formatted:"
+            echo "The following files are not gofmt-formatted:"
             echo "$out"
             exit 1
           fi
 
-      - name: go vet
+      - name: Run go vet
         run: go vet ./...
 
-      - name: golangci-lint
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v2.1.6
+          args: --timeout=5m
 
-      - name: Vulnerability check (govulncheck)
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run vulnerability check
+        run: govulncheck ./...
+```
