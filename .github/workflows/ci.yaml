@@ -17,6 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout permissions package (sibling repo)
+        uses: actions/checkout@v4
+        with:
+          repository: OpenFinCore/permissions-package
+          path: ../permissions
+          token: ${{ secrets.SIBLING_REPO_TOKEN }}   
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod   
@@ -42,6 +49,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout permissions package (sibling repo)
+        uses: actions/checkout@v4
+        with:
+          repository: OpenFinCore/permissions-package
+          path: ../permissions
+          token: ${{ secrets.SIBLING_REPO_TOKEN }}  
 
       - uses: actions/setup-go@v5
         with:
