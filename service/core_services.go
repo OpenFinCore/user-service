@@ -13,6 +13,8 @@ func NewServiceProviderService(store repository.Store) *ServiceProviderService {
 	return &ServiceProviderService{NewCRUDService[models.ServiceProvider](store)}
 }
 
+
+
 type UserTypeService struct{ *CRUDService[models.UserType] }
 
 func NewUserTypeService(store repository.Store) *UserTypeService {
