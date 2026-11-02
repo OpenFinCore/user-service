@@ -43,7 +43,7 @@ type Container struct {
 
 	Seeds SeedsService
 }
-
+// comment for testing
 func NewServiceContainer() *Container {
 	config := conf.GetConfig()
 	log := logger.LoggerInit(config.Logger)
