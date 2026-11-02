@@ -1,11 +1,11 @@
 {
   "logger": {
     "level": "info",
-    "path": "./conf/logs/ofc-user-service",
+    "path": "./logger/logs",
     "name": "ofc-user-service.log",
     "maxSize": 50,
     "rotationtime": 1440,
-    "secretKeys": ["password", "password_hash", "token_hash"],
+    "secretKeys": ["password", "password_hash", "token_hash", "otp", "code_hash"],
     "encoderConfig": {
       "messageKey": "message",
       "levelKey": "level",
@@ -19,12 +19,38 @@
     "port": "5432",
     "database": "ofc_user_service",
     "user": "postgres",
-    "password": "",
+    "password": "dev_postgres_123",
     "sslMode": "disable",
     "enableAutoMigrate": true
   },
   "seed": {
     "dir": "./seeds"
+  },
+  "redis": {
+    "addr": "127.0.0.1:6379",
+    "password": "",
+    "db": 0
+  },
+  "http": {
+    "addr": ":8080",
+    "readTimeoutSeconds": 10,
+    "writeTimeoutSeconds": 10,
+    "shutdownTimeoutSeconds": 15
+  },
+  "devTenant": {
+    "id": "d0d0d0d0-0000-4000-8000-000000000001",
+    "name": "Development Tenant"
+  },
+  "request": {
+    "replayWindowSeconds": 300
+  },
+  "otp": {
+    "length": 6,
+    "ttlSeconds": 300,
+    "resendCooldownSeconds": 60,
+    "maxRequestsPerHour": 5,
+    "maxVerifyAttempts": 5,
+    "hashSecret": "dev-only-otp-hash-secret-change-me"
   },
   "stage": "development"
 }

@@ -13,6 +13,7 @@ import (
 	"ofc-user-service/conf"
 	c "ofc-user-service/context"
 	"ofc-user-service/models"
+
 	"ofc-user-service/repository"
 
 	_ "github.com/lib/pq"
@@ -184,10 +185,26 @@ func initDb() error {
 }
 
 func (s *Store) BeginTx(ctx c.Context) (c.Context, error) {
-	tx := s.db.Begin()
+	db := s.db
+	if base := ctx.Context(); base != nil {
+		// Bind the request's cancellation/deadline to every query in the tx.
+		db = db.WithContext(base)
+	}
+	tx := db.Begin()
 	if tx.Error != nil {
 		return c.Context{}, tx.Error
 	}
+
+	// Scope row-level security to the request's tenant for this
+	// transaction only (is_local = true), so a pooled connection never
+	// carries one tenant's id into another request.
+	if sp := ctx.ServiceProviderID(); sp != nil {
+		if err := tx.Exec("SELECT set_config('app.current_service_provider_id', ?, true)", sp.String()).Error; err != nil {
+			tx.Rollback()
+			return c.Context{}, fmt.Errorf("setting tenant for transaction: %w", err)
+		}
+	}
+
 	return ctx.WithTx(tx), nil
 }
 

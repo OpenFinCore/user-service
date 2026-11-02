@@ -507,7 +507,7 @@ CREATE TABLE IF NOT EXISTS devices (
     service_provider_id UUID NOT NULL
                             REFERENCES service_providers(id)
                             ON DELETE CASCADE,
-    user_id             UUID NOT NULL,
+    user_id             UUID,               -- NULL while PENDING_VERIFICATION (before the user exists)
     device_uuid         VARCHAR(128) NOT NULL,
     device_name         VARCHAR(150),
     device_type         VARCHAR(32) NOT NULL,

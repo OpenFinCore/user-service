@@ -2,6 +2,9 @@ package service
 
 import (
 	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 
 	"ofc-user-service/conf"
 	"ofc-user-service/logger"
@@ -41,6 +44,11 @@ type Container struct {
 	PasswordResetTokens *PasswordResetTokenService
 	AuditLogs           *AuditLogService
 
+	// Domain services: they own no table, they combine the ones above.
+	Auth         *AuthService
+	OTPs         *OTPService
+	Registration *RegistrationService
+
 	Seeds SeedsService
 }
 
@@ -49,20 +57,23 @@ func NewServiceContainer() *Container {
 	log := logger.LoggerInit(config.Logger)
 	store := pgstore.SharedStore()
 
+	serviceProviderStatuses := NewServiceProviderStatusService(store)
+	deviceStatuses := NewDeviceStatusService(store)
+
 	container := &Container{
 		Store: store,
 		Log:   log,
 
-		ServiceProviderStatuses:    NewServiceProviderStatusService(store),
+		ServiceProviderStatuses:    serviceProviderStatuses,
 		UserTypeStatuses:           NewUserTypeStatusService(store),
 		TwoFactorStatuses:          NewTwoFactorStatusService(store),
 		UserStatuses:               NewUserStatusService(store),
-		DeviceStatuses:             NewDeviceStatusService(store),
+		DeviceStatuses:             deviceStatuses,
 		SessionStatuses:            NewSessionStatusService(store),
 		RefreshTokenStatuses:       NewRefreshTokenStatusService(store),
 		PasswordResetTokenStatuses: NewPasswordResetTokenStatusService(store),
 
-		ServiceProviders: NewServiceProviderService(store),
+		ServiceProviders: NewServiceProviderService(store, serviceProviderStatuses),
 		UserTypes:        NewUserTypeService(store),
 		Permissions:      NewPermissionService(store),
 		Roles:            NewRoleService(store),
@@ -70,7 +81,7 @@ func NewServiceContainer() *Container {
 		Countries:        NewCountryService(store),
 		Users:            NewUserService(store),
 
-		Devices:             NewDeviceService(store),
+		Devices:             NewDeviceService(store, deviceStatuses),
 		UserSessions:        NewUserSessionService(store),
 		RefreshTokens:       NewRefreshTokenService(store),
 		PasswordResetTokens: NewPasswordResetTokenService(store),
@@ -81,6 +92,33 @@ func NewServiceContainer() *Container {
 	if err := container.Seeds.SeedAll(); err != nil {
 		panic(fmt.Errorf("seeding failed: %w", err))
 	}
+
+	if config.IsDevelopment() {
+		devTenantID, err := uuid.Parse(config.DevTenant.ID)
+		if err != nil {
+			panic(fmt.Errorf("devTenant.id must be a UUID: %w", err))
+		}
+		ensureDevTenant(NewDevTenantService(store, container.ServiceProviders, devTenantID, config.DevTenant.Name))
+	}
+
+	container.Auth = NewAuthService(repository.SharedRedis(), time.Duration(config.Request.ReplayWindowSeconds)*time.Second)
+	container.OTPs = NewOTPService(repository.SharedRedis(), config.OTP.HashSecret, OTPPolicy{
+		Length:             config.OTP.Length,
+		TTL:                time.Duration(config.OTP.TTLSeconds) * time.Second,
+		ResendCooldown:     time.Duration(config.OTP.ResendCooldownSeconds) * time.Second,
+		MaxRequestsPerHour: config.OTP.MaxRequestsPerHour,
+		MaxVerifyAttempts:  config.OTP.MaxVerifyAttempts,
+	})
+	container.Registration = NewRegistrationService(
+		store,
+		container.ServiceProviders,
+		container.Users,
+		container.Devices,
+		container.OTPs,
+		container.AuditLogs,
+		UnconfiguredSMSSender{},
+		config.IsDevelopment(),
+	)
 
 	return container
 }

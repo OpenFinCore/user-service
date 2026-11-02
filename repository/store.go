@@ -15,6 +15,9 @@ type Store interface {
 	// DB returns the base *gorm.DB (outside of any transaction).
 	DB() *gorm.DB
 
+	// BeginTx opens a transaction. When ctx carries a ServiceProviderID it
+	// is applied to the transaction (SET LOCAL) so row-level security
+	// scopes every query in it to that tenant.
 	BeginTx(ctx c.Context) (c.Context, error)
 	CommitTx(ctx c.Context) error
 	Rollback(ctx c.Context) error
