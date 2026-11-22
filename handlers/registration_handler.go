@@ -33,15 +33,11 @@ func (h *RegistrationHandler) RequestOTP(w http.ResponseWriter, r *http.Request)
 		service.WriteError(w, r, err)
 		return
 	}
-	device := service.DeviceHeaders(r)
-	if err := device.ValidateDevice(); err != nil {
-		service.WriteError(w, r, err)
-		return
-	}
 
+	// Tenant and device reach the service on AppContext, set by the route
+	// middleware (RequireTenant, RequireDevice).
 	res, err := h.registration.RequestOTP(service.AppContext(r), service.RequestOTPInput{
 		PhoneNumber: req.PhoneNumber,
-		Device:      device,
 		IPAddress:   service.ClientIP(r),
 		UserAgent:   r.UserAgent(),
 	})

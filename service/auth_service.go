@@ -35,6 +35,12 @@ func (s *AuthService) RequireTenant(next http.Handler) http.Handler {
 	return tenantMiddleware(next)
 }
 
+// RequireDevice rejects requests without valid X-Device-* headers and puts
+// the device on the request's c.Context (DeviceMetaData).
+func (s *AuthService) RequireDevice(next http.Handler) http.Handler {
+	return deviceMiddleware(next)
+}
+
 // NotFound answers routes that don't exist, in the standard envelope.
 func (s *AuthService) NotFound() http.Handler {
 	return http.HandlerFunc(routeNotFound)

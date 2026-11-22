@@ -46,7 +46,7 @@ func newTestAPI(t *testing.T, reg *fakeRegistration) http.Handler {
 // post sends a request with fresh, valid guard headers.
 func post(t *testing.T, api http.Handler, tenant, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/v1/users/register/request", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/users/register-request", strings.NewReader(body))
 	req.Header.Set(service.HeaderRequestID, uuid.NewString())
 	req.Header.Set(service.HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
 	if tenant != "" {
@@ -111,8 +111,10 @@ func TestRegisterRequest_Created(t *testing.T) {
 	if reg.gotCtx.Session() != rec.Header().Get(service.HeaderRequestID) {
 		t.Fatal("request id not passed as the session id")
 	}
-	if reg.gotIn.PhoneNumber != "+923001234567" || reg.gotIn.IPAddress == "" ||
-		reg.gotIn.Device != (models.DeviceFilters{DeviceID: "device-abc", DeviceType: "MOBILE_ANDROID", OSName: "Android"}) {
+	if d := reg.gotCtx.DeviceMetaData(); d == nil || *d != (models.DeviceFilters{DeviceID: "device-abc", DeviceType: "MOBILE_ANDROID", OSName: "Android"}) {
+		t.Fatalf("device not passed in the context: %+v", d)
+	}
+	if reg.gotIn.PhoneNumber != "+923001234567" || reg.gotIn.IPAddress == "" {
 		t.Fatalf("unexpected input %+v", reg.gotIn)
 	}
 }
@@ -137,7 +139,7 @@ func TestRegisterRequest_TenantHeader(t *testing.T) {
 
 func TestRegisterRequest_GuardHeadersRequired(t *testing.T) {
 	reg := &fakeRegistration{}
-	req := httptest.NewRequest(http.MethodPost, "/v1/users/register/request", strings.NewReader(`{"phone_number":"+923001234567"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/users/register-request", strings.NewReader(`{"phone_number":"+923001234567"}`))
 	req.Header.Set(service.HeaderServiceProvider, uuid.NewString())
 	rec := httptest.NewRecorder()
 	newTestAPI(t, reg).ServeHTTP(rec, req)
@@ -152,7 +154,7 @@ func TestRegisterRequest_DuplicateRejected(t *testing.T) {
 	api := newTestAPI(t, reg)
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	send := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/v1/users/register/request", strings.NewReader(`{"phone_number":"+923001234567"}`))
+		req := httptest.NewRequest(http.MethodPost, "/v1/users/register-request", strings.NewReader(`{"phone_number":"+923001234567"}`))
 		req.Header.Set(service.HeaderRequestID, "fixed-id")
 		req.Header.Set(service.HeaderTimestamp, timestamp)
 		req.Header.Set(service.HeaderServiceProvider, uuid.NewString())
@@ -226,7 +228,7 @@ func TestRegisterRequest_InvalidDeviceHeaders(t *testing.T) {
 	}
 	for _, tc := range cases {
 		reg := &fakeRegistration{}
-		req := httptest.NewRequest(http.MethodPost, "/v1/users/register/request", strings.NewReader(`{"phone_number":"+923001234567"}`))
+		req := httptest.NewRequest(http.MethodPost, "/v1/users/register-request", strings.NewReader(`{"phone_number":"+923001234567"}`))
 		req.Header.Set(service.HeaderRequestID, uuid.NewString())
 		req.Header.Set(service.HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
 		req.Header.Set(service.HeaderServiceProvider, uuid.NewString())

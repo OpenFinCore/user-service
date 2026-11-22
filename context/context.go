@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"ofc-user-service/models"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ type Context struct {
 	tx                *gorm.DB
 	actorID           *uuid.UUID
 	serviceProviderID *uuid.UUID
+	deviceMetaData    *models.DeviceFilters
 	session           string
 }
 
@@ -33,6 +35,10 @@ func (c Context) ServiceProviderID() *uuid.UUID {
 	return c.serviceProviderID
 }
 func (c Context) Session() string { return c.session }
+
+// DeviceMetaData is the caller's device, set by the RequireDevice route
+// middleware; nil on routes that don't use it.
+func (c Context) DeviceMetaData() *models.DeviceFilters { return c.deviceMetaData }
 
 func (c Context) Deadline() (deadline time.Time, ok bool) { return c.baseCtx.Deadline() }
 func (c Context) Done() <-chan struct{}                   { return c.baseCtx.Done() }
@@ -59,6 +65,13 @@ func (c Context) WithActorID(actorID uuid.UUID) Context {
 // WithServiceProviderID returns a Context scoped to the given tenant.
 func (c Context) WithServiceProviderID(serviceProviderID uuid.UUID) Context {
 	c.serviceProviderID = &serviceProviderID
+	return c
+}
+
+// WithDeviceMetaData returns a Context carrying the caller's validated
+// device headers.
+func (c Context) WithDeviceMetaData(deviceMetaData models.DeviceFilters) Context {
+	c.deviceMetaData = &deviceMetaData
 	return c
 }
 

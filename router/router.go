@@ -3,9 +3,11 @@
 package router
 
 import (
+	"fmt"
 	"net/http"
 
 	"ofc-user-service/handlers"
+	"ofc-user-service/models"
 	"ofc-user-service/service"
 )
 
@@ -27,9 +29,20 @@ func New(container *service.Container) http.Handler {
 // (container.Auth.Common: request id + timestamp guard, access log, recover).
 func newAPI(auth *service.AuthService, registration *handlers.RegistrationHandler) http.Handler {
 	api := http.NewServeMux()
+	urlPrefixV1 := fmt.Sprintf("/%s/%s", models.Version1, models.ServiceUrlPrefix)
 
-	registerRegistrationRoutes(api, auth, registration)
+	registerRegistrationRoutes(api, auth, registration, urlPrefixV1)
 
 	api.Handle("/", auth.NotFound())
 	return auth.Common(api)
+}
+
+// chain wraps h in route-level middleware, applied in the order listed:
+// chain(h, a, b) runs a, then b, then h.
+func chain(h http.HandlerFunc, mws ...func(http.Handler) http.Handler) http.Handler {
+	var out http.Handler = h
+	for i := len(mws) - 1; i >= 0; i-- {
+		out = mws[i](out)
+	}
+	return out
 }

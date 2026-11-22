@@ -144,7 +144,7 @@ func newRegistrationHarness(devMode bool) *registrationHarness {
 }
 
 func (h *registrationHarness) ctx() c.Context {
-	return c.NewContext(context.Background()).WithServiceProviderID(h.tenant).WithSession("test")
+	return c.NewContext(context.Background()).WithServiceProviderID(h.tenant).WithDeviceMetaData(testDevice).WithSession("test")
 }
 
 func wantAppError(t *testing.T, err error, want models.ResponseCode) *models.AppError {
@@ -163,7 +163,7 @@ var testDevice = models.DeviceFilters{DeviceID: "device-abc", DeviceType: "MOBIL
 func TestRequestOTP_DevelopmentReturnsCodeAndSkipsSMS(t *testing.T) {
 	h := newRegistrationHarness(true)
 
-	res, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice, IPAddress: "10.0.0.1"})
+	res, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", IPAddress: "10.0.0.1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestRequestOTP_DevelopmentReturnsCodeAndSkipsSMS(t *testing.T) {
 
 func TestRequestOTP_ProductionSendsSMSAndHidesCode(t *testing.T) {
 	h := newRegistrationHarness(false)
-	res, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice})
+	res, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestRequestOTP_ProductionSendsSMSAndHidesCode(t *testing.T) {
 func TestRequestOTP_SMSFailureRevokesAndReturnsUnavailable(t *testing.T) {
 	h := newRegistrationHarness(false)
 	h.sms.err = errors.New("provider down")
-	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice})
+	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 	wantAppError(t, err, models.CodeOTPDeliveryFailed)
 	if len(h.otps.revoked) != 1 {
 		t.Fatal("undelivered code must be revoked")
@@ -211,7 +211,7 @@ func TestRequestOTP_SMSFailureRevokesAndReturnsUnavailable(t *testing.T) {
 func TestRequestOTP_AuditFailureRevokes(t *testing.T) {
 	h := newRegistrationHarness(true)
 	h.audit.err = errors.New("db down")
-	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice})
+	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 	if err == nil || len(h.otps.revoked) != 1 {
 		t.Fatalf("want error and revoke, got err=%v revoked=%v", err, h.otps.revoked)
 	}
@@ -222,7 +222,7 @@ func TestRequestOTP_AuditFailureRevokes(t *testing.T) {
 
 func TestRequestOTP_MissingTenant(t *testing.T) {
 	h := newRegistrationHarness(true)
-	_, err := h.svc.RequestOTP(c.NewContext(context.Background()), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice})
+	_, err := h.svc.RequestOTP(c.NewContext(context.Background()), RequestOTPInput{PhoneNumber: "+923001234567"})
 	wantAppError(t, err, models.CodeServiceProviderHeaderRequired)
 }
 
@@ -231,7 +231,7 @@ func TestRequestOTP_UnknownOrInactiveTenant(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newRegistrationHarness(true)
 			h.svc.serviceProviders = fakeTenants{sp: sp}
-			_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice})
+			_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 			wantAppError(t, err, models.CodeServiceProviderNotFound)
 			if len(h.otps.issued) != 0 {
 				t.Fatal("no OTP may be issued for an inactive tenant")
@@ -243,7 +243,7 @@ func TestRequestOTP_UnknownOrInactiveTenant(t *testing.T) {
 func TestRequestOTP_PhoneAlreadyRegistered(t *testing.T) {
 	h := newRegistrationHarness(true)
 	h.svc.users = fakeUsers{taken: true}
-	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice})
+	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 	wantAppError(t, err, models.CodePhoneAlreadyRegistered)
 	if len(h.otps.issued) != 0 {
 		t.Fatal("no OTP may be issued for a registered phone")
@@ -253,7 +253,7 @@ func TestRequestOTP_PhoneAlreadyRegistered(t *testing.T) {
 func TestRequestOTP_RateLimitPassesThrough(t *testing.T) {
 	h := newRegistrationHarness(true)
 	h.otps.issueErr = models.NewAppError(models.CodeOTPResendCooldown).WithRetryAfter(40 * time.Second)
-	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice})
+	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 	if wantAppError(t, err, models.CodeOTPResendCooldown).RetryAfter != 40*time.Second {
 		t.Fatal("retry-after must be preserved")
 	}
@@ -264,7 +264,7 @@ func TestRequestOTP_RateLimitPassesThrough(t *testing.T) {
 
 func TestRequestOTP_RegistersPendingDeviceAndHoldsOTPAgainstIt(t *testing.T) {
 	h := newRegistrationHarness(true)
-	res, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice, IPAddress: "10.0.0.1", UserAgent: "app/1.0"})
+	res, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", IPAddress: "10.0.0.1", UserAgent: "app/1.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestRequestOTP_RegistersPendingDeviceAndHoldsOTPAgainstIt(t *testing.T) {
 func TestRequestOTP_DeviceFailureIssuesNoOTP(t *testing.T) {
 	h := newRegistrationHarness(true)
 	h.devices.err = errors.New("db down")
-	if _, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice}); err == nil {
+	if _, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"}); err == nil {
 		t.Fatal("want error")
 	}
 	if len(h.otps.issued) != 0 || h.store.rollbacks != 1 {
@@ -298,7 +298,7 @@ func TestRequestOTP_DeviceFailureIssuesNoOTP(t *testing.T) {
 func TestRequestOTP_RejectedRequestsRegisterNoDevice(t *testing.T) {
 	h := newRegistrationHarness(true)
 	h.svc.users = fakeUsers{taken: true}
-	_, _ = h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567", Device: testDevice})
+	_, _ = h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 	if len(h.devices.registered) != 0 {
 		t.Fatal("no device may be registered for an already registered phone")
 	}

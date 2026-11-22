@@ -187,6 +187,20 @@ func ClientIP(r *http.Request) string {
 	return host
 }
 
+// deviceMiddleware requires valid X-Device-* headers and puts them on the
+// request's c.Context (read with AppContext(r).DeviceMetaData()).
+func deviceMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device := DeviceHeaders(r)
+		if err := device.ValidateDevice(); err != nil {
+			WriteError(w, r, err)
+			return
+		}
+		ctx := context.WithValue(r.Context(), keyAppCtx, AppContext(r).WithDeviceMetaData(device))
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 // DeviceHeaders reads the X-Device-* headers describing the caller's
 // device (trimmed; validate with DeviceFilters.ValidateDevice).
 func DeviceHeaders(r *http.Request) models.DeviceFilters {

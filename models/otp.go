@@ -7,7 +7,7 @@ import (
 )
 
 type RequestOTPRequest struct {
-	PhoneNumber string `json:"phone_number"`
+	PhoneNumber string `json:"phone_number" binding:"required"`
 }
 
 func (s *RequestOTPRequest) ValidatePhone() error {

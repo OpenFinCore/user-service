@@ -16,9 +16,6 @@ import (
 
 type RequestOTPInput struct {
 	PhoneNumber string
-	// Device is the device the request comes from (X-Device-* headers); it
-	// is registered as PENDING_VERIFICATION and the OTP is held against it.
-	Device models.DeviceFilters
 	// IPAddress and UserAgent describe the caller, for the audit trail.
 	IPAddress string
 	UserAgent string
@@ -104,6 +101,12 @@ func (s *RegistrationService) RequestOTP(ctx c.Context, in RequestOTPInput) (*Re
 		return nil, models.NewAppError(models.CodeServiceProviderHeaderRequired)
 	}
 	spID := *spIDPtr
+	// The caller's device (RequireDevice middleware) is registered as
+	// PENDING_VERIFICATION and the OTP is held against it.
+	deviceInfo := ctx.DeviceMetaData()
+	if deviceInfo == nil {
+		return nil, models.NewAppError(models.CodeDeviceIDHeaderRequired)
+	}
 
 	// Tenant-scoped reads and writes run in a transaction so row-level
 	// security applies to them.
@@ -123,7 +126,7 @@ func (s *RegistrationService) RequestOTP(ctx c.Context, in RequestOTPInput) (*Re
 		if taken {
 			return models.NewAppError(models.CodePhoneAlreadyRegistered)
 		}
-		device, err = s.devices.RegisterPending(ctx, spID, deviceFromInput(in))
+		device, err = s.devices.RegisterPending(ctx, spID, deviceFromInput(*deviceInfo, in))
 		if err != nil {
 			return fmt.Errorf("registration: registering device: %w", err)
 		}
@@ -168,14 +171,14 @@ func (s *RegistrationService) RequestOTP(ctx c.Context, in RequestOTPInput) (*Re
 
 // deviceFromInput maps the request's device headers and caller details to
 // a devices row.
-func deviceFromInput(in RequestOTPInput) models.Device {
+func deviceFromInput(d models.DeviceFilters, in RequestOTPInput) models.Device {
 	return models.Device{
-		DeviceUUID: in.Device.DeviceID,
-		DeviceType: in.Device.DeviceType,
-		DeviceName: utils.OptionalString(in.Device.DeviceName),
-		OSName:     utils.OptionalString(in.Device.OSName),
-		OSVersion:  utils.OptionalString(in.Device.OSVersion),
-		AppVersion: utils.OptionalString(in.Device.AppVersion),
+		DeviceUUID: d.DeviceID,
+		DeviceType: d.DeviceType,
+		DeviceName: utils.OptionalString(d.DeviceName),
+		OSName:     utils.OptionalString(d.OSName),
+		OSVersion:  utils.OptionalString(d.OSVersion),
+		AppVersion: utils.OptionalString(d.AppVersion),
 		IPAddress:  utils.ParseIP(in.IPAddress),
 		UserAgent:  utils.OptionalString(utils.Truncate(strings.TrimSpace(in.UserAgent), 512)),
 	}

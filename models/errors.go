@@ -55,7 +55,7 @@ var (
 	CodePhoneNumberRequired           = ResponseCode{1100, KindValidation, "Phone Number is required"}
 	CodePhoneNumberInvalid            = ResponseCode{1101, KindValidation, "Phone Number must be in international format, e.g. +923001234567"}
 
-	CodeServiceProviderNotFound = ResponseCode{2000, KindNotFound, "Service Provider not found"}
+	CodeServiceProviderNotFound = ResponseCode{2005, KindNotFound, "Service Provider not found"}
 	CodePhoneAlreadyRegistered  = ResponseCode{2001, KindConflict, "Phone Number is already registered"}
 	CodeOTPResendCooldown       = ResponseCode{2002, KindRateLimited, "Please wait before requesting another code"}
 	CodeOTPHourlyLimit          = ResponseCode{2003, KindRateLimited, "Too many codes requested for this Phone Number, try again later"}
