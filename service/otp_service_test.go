@@ -198,3 +198,73 @@ func TestGenerateNumericCode_RejectsBadLength(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestOTPService_ReserveThenIssueReserved(t *testing.T) {
+	s, mr := newTestOTPService(t)
+	sp, phone := uuid.New(), "+923001234567"
+
+	if err := s.Reserve(bg(), OTPPurposeRegistration, sp, phone); err != nil {
+		t.Fatalf("fresh phone must be allowed: %v", err)
+	}
+	err := s.Reserve(bg(), OTPPurposeRegistration, sp, phone)
+	if appErr, ok := models.AsAppError(err); !ok || appErr.Code != models.CodeOTPResendCooldown.Code || appErr.RetryAfter != time.Minute {
+		t.Fatalf("second reserve must hit the cooldown, got %v", err)
+	}
+
+	// The reserved code is stored without re-checking the limits.
+	otp, err := s.IssueReserved(bg(), OTPPurposeRegistration, sp, phone, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := s.keys(OTPPurposeRegistration, sp, phone, dev)[0]
+	if mr.HGet(key, "code_hash") != s.hash(OTPPurposeRegistration, sp, phone, dev, otp.Code) || mr.TTL(key) != 5*time.Minute {
+		t.Fatal("reserved code not stored correctly")
+	}
+	if got, _ := mr.Get(s.keys(OTPPurposeRegistration, sp, phone, dev)[2]); got != "1" {
+		t.Fatalf("one reservation = one counted code, hourly counter is %q", got)
+	}
+}
+
+func TestOTPService_ReserveHourlyCapAndRelease(t *testing.T) {
+	s, mr := newTestOTPService(t) // cap: 3 per hour
+	sp, phone := uuid.New(), "+923001234567"
+	for i := 0; i < 3; i++ {
+		if err := s.Reserve(bg(), OTPPurposeRegistration, sp, phone); err != nil {
+			t.Fatalf("reserve %d: %v", i+1, err)
+		}
+		mr.FastForward(time.Minute + time.Second)
+	}
+	err := s.Reserve(bg(), OTPPurposeRegistration, sp, phone)
+	if appErr, ok := models.AsAppError(err); !ok || appErr.Code != models.CodeOTPHourlyLimit.Code {
+		t.Fatalf("want hourly cap, got %v", err)
+	}
+
+	// Releasing an unused reservation gives the slot back.
+	s.RevokeQuietly(bg(), OTPPurposeRegistration, sp, phone, uuid.Nil)
+	if err := s.Reserve(bg(), OTPPurposeRegistration, sp, phone); err != nil {
+		t.Fatalf("released slot must be reusable: %v", err)
+	}
+}
+
+func TestOTPService_ConcurrentReserveOnlyOneWins(t *testing.T) {
+	s, _ := newTestOTPService(t)
+	sp := uuid.New()
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	won := 0
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if s.Reserve(bg(), OTPPurposeRegistration, sp, "+923001234567") == nil {
+				mu.Lock()
+				won++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if won != 1 {
+		t.Fatalf("exactly one concurrent reserve may win, got %d", won)
+	}
+}

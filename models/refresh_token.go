@@ -12,7 +12,7 @@ type RefreshToken struct {
 	ServiceProviderID uuid.UUID        `gorm:"column:service_provider_id;type:uuid;not null;uniqueIndex:uq_refresh_tokens_tenant_id,priority:1" json:"service_provider_id"`
 	ServiceProvider   *ServiceProvider `gorm:"foreignKey:ServiceProviderID;references:ID;constraint:OnDelete:CASCADE" json:"service_provider,omitempty"`
 
-	SessionID uuid.UUID    `gorm:"column:session_id;type:uuid;not null;index:idx_refresh_tokens_session" json:"session_id"`
+	SessionID uuid.UUID    `gorm:"column:session_id;type:uuid;not null" json:"session_id"`
 	Session   *UserSession `gorm:"foreignKey:SessionID;references:ID;constraint:OnDelete:CASCADE" json:"session,omitempty"`
 
 	TokenHash string `gorm:"column:token_hash;not null;uniqueIndex" json:"-"`

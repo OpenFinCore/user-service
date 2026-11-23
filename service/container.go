@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"ofc-user-service/conf"
 	"ofc-user-service/logger"
@@ -19,6 +22,7 @@ import (
 // consumers (future controllers, jobs, tests) reach into it directly.
 type Container struct {
 	Store repository.Store
+	Redis *redis.Client
 	Log   *zap.Logger
 
 	ServiceProviderStatuses    *ServiceProviderStatusService
@@ -101,7 +105,14 @@ func NewServiceContainer() *Container {
 		ensureDevTenant(NewDevTenantService(store, container.ServiceProviders, devTenantID, config.DevTenant.Name))
 	}
 
-	container.Auth = NewAuthService(repository.SharedRedis(), time.Duration(config.Request.ReplayWindowSeconds)*time.Second)
+	container.Redis = repository.SharedRedis()
+	rateLimits := map[string]RateLimit{}
+	for name, rl := range config.RateLimits {
+		rateLimits[name] = RateLimit{Limit: rl.Limit, Window: time.Duration(rl.WindowSeconds) * time.Second}
+	}
+	container.Auth = NewAuthService(container.Redis, time.Duration(config.Request.ReplayWindowSeconds)*time.Second).
+		WithTrustedProxies(config.HTTP.TrustedProxyPrefixes()).
+		WithRateLimits(rateLimits)
 	container.OTPs = NewOTPService(repository.SharedRedis(), config.OTP.HashSecret, OTPPolicy{
 		Length:             config.OTP.Length,
 		TTL:                time.Duration(config.OTP.TTLSeconds) * time.Second,
@@ -120,5 +131,26 @@ func NewServiceContainer() *Container {
 		config.IsDevelopment(),
 	)
 
+	if config.IsDevelopment() {
+		logger.LogWarning("", "stage is DEVELOPMENT: OTPs are returned in API responses and the dev tenant is enabled. Never run this stage in production.")
+	}
 	return container
+}
+
+// Ready reports whether the service's dependencies answer (readiness
+// probe).
+func (c *Container) Ready(ctx context.Context) error {
+	if err := c.Store.Ping(ctx); err != nil {
+		return fmt.Errorf("postgres: %w", err)
+	}
+	if err := c.Redis.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("redis: %w", err)
+	}
+	return nil
+}
+
+// Close releases the database pool and the Redis client (graceful
+// shutdown, after the HTTP server has drained).
+func (c *Container) Close() error {
+	return errors.Join(c.Store.Close(), c.Redis.Close())
 }

@@ -18,10 +18,18 @@
     "addr": "127.0.0.1",
     "port": "5432",
     "database": "ofc_user_service",
-    "user": "postgres",
-    "password": "dev_postgres_123",
+    "user": "ofc_app",
+    "password": "dev_ofc_app_123",
+    "adminUser": "postgres",
+    "adminPassword": "dev_postgres_123",
     "sslMode": "disable",
-    "enableAutoMigrate": true
+    "enableAutoMigrate": true,
+    "maxOpenConns": 50,
+    "maxIdleConns": 25,
+    "connMaxLifetimeMinutes": 30,
+    "connMaxIdleMinutes": 5,
+    "statementTimeoutMs": 5000,
+    "connectAttempts": 10
   },
   "seed": {
     "dir": "./seeds"
@@ -35,7 +43,12 @@
     "addr": ":8080",
     "readTimeoutSeconds": 10,
     "writeTimeoutSeconds": 10,
-    "shutdownTimeoutSeconds": 15
+    "shutdownTimeoutSeconds": 15,
+    "trustedProxies": []
+  },
+  "rateLimits": {
+    "register-request:ip": { "limit": 60, "windowSeconds": 3600 },
+    "register-request:device": { "limit": 10, "windowSeconds": 3600 }
   },
   "devTenant": {
     "id": "d0d0d0d0-0000-4000-8000-000000000001",

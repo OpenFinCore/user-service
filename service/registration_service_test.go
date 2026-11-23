@@ -24,12 +24,13 @@ func (s *fakeStore) DB() *gorm.DB                                             { 
 func (s *fakeStore) BeginTx(ctx c.Context) (c.Context, error)                 { return ctx.WithTx(&gorm.DB{}), nil }
 func (s *fakeStore) CommitTx(c.Context) error                                 { s.commits++; return nil }
 func (s *fakeStore) Rollback(c.Context) error                                 { s.rollbacks++; return nil }
-func (s *fakeStore) TryAdvisoryLock(c.Context, int) (bool, error)             { return true, nil }
-func (s *fakeStore) AdvisoryUnlock(c.Context, int) error                      { return nil }
+func (s *fakeStore) AdvisoryXactLock(c.Context, int64) error                  { return nil }
 func (s *fakeStore) UpdateSeedRegistry(c.Context, *models.SeedRegistry) error { return nil }
 func (s *fakeStore) GetSeedRegistryByFileName(c.Context, string) (*models.SeedRegistry, error) {
 	return nil, nil
 }
+func (s *fakeStore) Ping(context.Context) error { return nil }
+func (s *fakeStore) Close() error               { return nil }
 
 // fakeTenants returns sp only when it is active, like GetActiveByID.
 type fakeTenants struct{ sp *models.ServiceProvider }
@@ -69,13 +70,23 @@ func (f *fakeDevices) RegisterPending(_ c.Context, spID uuid.UUID, info models.D
 }
 
 type fakeOTPs struct {
-	devices  []uuid.UUID
-	issued   []string
-	revoked  []string
-	issueErr error
+	devices    []uuid.UUID
+	issued     []string
+	revoked    []string
+	issueErr   error
+	reserveErr error
+	reserved   []string
 }
 
-func (f *fakeOTPs) Issue(_ c.Context, _ string, _ uuid.UUID, recipient string, deviceID uuid.UUID) (*IssuedOTP, error) {
+func (f *fakeOTPs) Reserve(_ c.Context, _ string, _ uuid.UUID, recipient string) error {
+	if f.reserveErr != nil {
+		return f.reserveErr
+	}
+	f.reserved = append(f.reserved, recipient)
+	return nil
+}
+
+func (f *fakeOTPs) IssueReserved(_ c.Context, _ string, _ uuid.UUID, recipient string, deviceID uuid.UUID) (*IssuedOTP, error) {
 	if f.issueErr != nil {
 		return nil, f.issueErr
 	}
@@ -252,7 +263,7 @@ func TestRequestOTP_PhoneAlreadyRegistered(t *testing.T) {
 
 func TestRequestOTP_RateLimitPassesThrough(t *testing.T) {
 	h := newRegistrationHarness(true)
-	h.otps.issueErr = models.NewAppError(models.CodeOTPResendCooldown).WithRetryAfter(40 * time.Second)
+	h.otps.reserveErr = models.NewAppError(models.CodeOTPResendCooldown).WithRetryAfter(40 * time.Second)
 	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 	if wantAppError(t, err, models.CodeOTPResendCooldown).RetryAfter != 40*time.Second {
 		t.Fatal("retry-after must be preserved")
@@ -301,6 +312,52 @@ func TestRequestOTP_RejectedRequestsRegisterNoDevice(t *testing.T) {
 	_, _ = h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
 	if len(h.devices.registered) != 0 {
 		t.Fatal("no device may be registered for an already registered phone")
+	}
+}
+
+// A phone in its cooldown is rejected before any database work: no
+// transaction, no device row, no OTP.
+func TestRequestOTP_RateLimitedPhoneTouchesNoDatabase(t *testing.T) {
+	h := newRegistrationHarness(true)
+	h.otps.reserveErr = models.NewAppError(models.CodeOTPResendCooldown).WithRetryAfter(30 * time.Second)
+	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
+	wantAppError(t, err, models.CodeOTPResendCooldown)
+	if len(h.devices.registered) != 0 || h.store.commits != 0 || h.store.rollbacks != 0 || len(h.otps.issued) != 0 {
+		t.Fatalf("rate-limited request touched the database: devices=%d commits=%d rollbacks=%d", len(h.devices.registered), h.store.commits, h.store.rollbacks)
+	}
+}
+
+func TestRequestOTP_RequiresDeviceInContext(t *testing.T) {
+	h := newRegistrationHarness(true)
+	ctx := c.NewContext(context.Background()).WithServiceProviderID(h.tenant)
+	_, err := h.svc.RequestOTP(ctx, RequestOTPInput{PhoneNumber: "+923001234567"})
+	wantAppError(t, err, models.CodeDeviceIDHeaderRequired)
+}
+
+// An internal failure after the phone's slot was reserved releases it, so
+// the user can retry at once; a business rejection keeps the cooldown.
+func TestRequestOTP_ReservationReleasedOnlyOnInternalFailure(t *testing.T) {
+	h := newRegistrationHarness(true)
+	h.devices.err = errors.New("db down")
+	if _, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"}); err == nil {
+		t.Fatal("want error")
+	}
+	if len(h.otps.reserved) != 1 || len(h.otps.revoked) != 1 {
+		t.Fatalf("internal failure must release the reservation: reserved=%v revoked=%v", h.otps.reserved, h.otps.revoked)
+	}
+
+	h = newRegistrationHarness(true)
+	h.svc.users = fakeUsers{taken: true}
+	_, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"})
+	wantAppError(t, err, models.CodePhoneAlreadyRegistered)
+	if len(h.otps.reserved) != 1 || len(h.otps.revoked) != 0 {
+		t.Fatalf("business rejection must keep the cooldown: reserved=%v revoked=%v", h.otps.reserved, h.otps.revoked)
+	}
+
+	h = newRegistrationHarness(true)
+	h.otps.issueErr = errors.New("redis down")
+	if _, err := h.svc.RequestOTP(h.ctx(), RequestOTPInput{PhoneNumber: "+923001234567"}); err == nil || len(h.otps.revoked) != 1 {
+		t.Fatalf("failed issue must release the reservation, got err=%v revoked=%v", err, h.otps.revoked)
 	}
 }
 

@@ -43,7 +43,8 @@ type (
 		RegisterPending(ctx c.Context, spID uuid.UUID, info models.Device) (*models.Device, error)
 	}
 	registrationOTPs interface {
-		Issue(ctx c.Context, purpose string, spID uuid.UUID, recipient string, deviceID uuid.UUID) (*IssuedOTP, error)
+		Reserve(ctx c.Context, purpose string, spID uuid.UUID, recipient string) error
+		IssueReserved(ctx c.Context, purpose string, spID uuid.UUID, recipient string, deviceID uuid.UUID) (*IssuedOTP, error)
 		RevokeQuietly(ctx c.Context, purpose string, spID uuid.UUID, recipient string, deviceID uuid.UUID)
 	}
 	Audit interface {
@@ -108,6 +109,20 @@ func (s *RegistrationService) RequestOTP(ctx c.Context, in RequestOTPInput) (*Re
 		return nil, models.NewAppError(models.CodeDeviceIDHeaderRequired)
 	}
 
+	// Claim this phone's OTP slot (resend cooldown + hourly cap) atomically
+	// in Redis BEFORE any database work: of any number of concurrent
+	// requests for one phone exactly one gets past here, the rest are
+	// rejected without touching Postgres.
+	if err := s.otps.Reserve(ctx, OTPPurposeRegistration, spID, in.PhoneNumber); err != nil {
+		return nil, err
+	}
+	// From here the slot is held. An internal failure releases it so the
+	// user can retry at once; a business rejection (phone taken, tenant or
+	// device not allowed) keeps the cooldown, which also slows probing.
+	release := func(deviceID uuid.UUID) {
+		s.otps.RevokeQuietly(ctx, OTPPurposeRegistration, spID, in.PhoneNumber, deviceID)
+	}
+
 	// Tenant-scoped reads and writes run in a transaction so row-level
 	// security applies to them.
 	var device *models.Device
@@ -133,11 +148,15 @@ func (s *RegistrationService) RequestOTP(ctx c.Context, in RequestOTPInput) (*Re
 		return nil
 	})
 	if err != nil {
+		if _, isAppErr := models.AsAppError(err); !isAppErr {
+			release(uuid.Nil)
+		}
 		return nil, err
 	}
 
-	otp, err := s.otps.Issue(ctx, OTPPurposeRegistration, spID, in.PhoneNumber, device.ID)
+	otp, err := s.otps.IssueReserved(ctx, OTPPurposeRegistration, spID, in.PhoneNumber, device.ID)
 	if err != nil {
+		release(device.ID)
 		return nil, err
 	}
 
@@ -149,7 +168,7 @@ func (s *RegistrationService) RequestOTP(ctx c.Context, in RequestOTPInput) (*Re
 		IPAddress:    in.IPAddress,
 		UserAgent:    in.UserAgent,
 	}); err != nil {
-		s.otps.RevokeQuietly(ctx, OTPPurposeRegistration, spID, in.PhoneNumber, device.ID)
+		release(device.ID)
 		return nil, err
 	}
 
@@ -161,8 +180,8 @@ func (s *RegistrationService) RequestOTP(ctx c.Context, in RequestOTPInput) (*Re
 		return result, nil
 	}
 
-	if err := s.sms.Send(ctx, in.PhoneNumber, utils.OtpSMSText(otp.Code, otp.ExpiresAt.Sub(time.Now()))); err != nil {
-		s.otps.RevokeQuietly(ctx, OTPPurposeRegistration, spID, in.PhoneNumber, device.ID)
+	if err := s.sms.Send(ctx, in.PhoneNumber, utils.OtpSMSText(otp.Code, time.Until(otp.ExpiresAt))); err != nil {
+		release(device.ID)
 		return nil, models.NewAppError(models.CodeOTPDeliveryFailed).WithCause(err)
 	}
 	logger.LogInfo(fmt.Sprintf("registration otp sent to %s", utils.MaskPhone(in.PhoneNumber)), ctx.Session())

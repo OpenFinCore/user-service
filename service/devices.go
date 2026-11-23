@@ -82,55 +82,76 @@ func (s *DeviceService) GetDevice(
 	return result, nil
 }
 
+// upsertPendingDeviceSQL inserts a pending device or refreshes the existing
+// pending row for the same tenant + device uuid, in one atomic statement.
+// The conflict target is the partial unique index uq_devices_pending_device
+// (service_provider_id, device_uuid) WHERE user_id IS NULL, so concurrent
+// requests from one device can never create duplicate rows. A pending row
+// in any other status (BLOCKED, REVOKED) is left alone and no id is
+// returned: such a device must not be revived by asking for a new code.
+const upsertPendingDeviceSQL = `
+INSERT INTO devices (
+    service_provider_id, user_id, device_uuid, device_name, device_type,
+    os_name, os_version, app_version, ip_address, user_agent,
+    is_trusted, status_id, last_seen_at
+) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?::inet, ?, FALSE, ?, ?)
+ON CONFLICT (service_provider_id, device_uuid) WHERE user_id IS NULL
+DO UPDATE SET
+    device_name  = EXCLUDED.device_name,
+    device_type  = EXCLUDED.device_type,
+    os_name      = EXCLUDED.os_name,
+    os_version   = EXCLUDED.os_version,
+    app_version  = EXCLUDED.app_version,
+    ip_address   = EXCLUDED.ip_address,
+    user_agent   = EXCLUDED.user_agent,
+    last_seen_at = EXCLUDED.last_seen_at
+WHERE devices.status_id = EXCLUDED.status_id
+RETURNING id`
+
 // RegisterPending registers the device a not-yet-existing user is signing
 // up from: a devices row with no user and the PENDING_VERIFICATION status.
 // A pending row for the same tenant + device uuid is reused (refreshed with
 // the latest details) so repeated OTP requests don't pile up rows. Must run
 // inside RunInTx: devices is tenant-scoped by row-level security.
+//
+// It returns CodeDeviceNotAllowed when the device's pending row exists but
+// is no longer PENDING_VERIFICATION (blocked or revoked).
 func (s *DeviceService) RegisterPending(ctx c.Context, spID uuid.UUID, info models.Device) (*models.Device, error) {
+	if info.DeviceUUID == "" {
+		return nil, models.ErrDeviceUUIDRequired
+	}
+	if info.DeviceType == "" {
+		return nil, models.ErrDeviceTypeRequired
+	}
 	pendingID, err := s.statuses.IDByName(ctx, models.DeviceStatusPendingVerification)
 	if err != nil {
 		return nil, fmt.Errorf("device: resolving status: %w", err)
 	}
 
 	now := time.Now().UTC()
+	var ip *string
+	if info.IPAddress != nil {
+		v := info.IPAddress.String()
+		ip = &v
+	}
+
+	var ids []uuid.UUID
+	err = repository.DBFrom(ctx, s.store).Raw(upsertPendingDeviceSQL,
+		spID, info.DeviceUUID, info.DeviceName, info.DeviceType,
+		info.OSName, info.OSVersion, info.AppVersion, ip, info.UserAgent,
+		pendingID, now,
+	).Scan(&ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("device: registering pending device: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, models.NewAppError(models.CodeDeviceNotAllowed)
+	}
+
+	info.ID = ids[0]
 	info.ServiceProviderID = spID
 	info.UserID = nil
+	info.StatusID = pendingID
 	info.LastSeenAt = &now
-
-	// Only the id is read back: the inet columns don't scan into *net.IP.
-	var ids []uuid.UUID
-	err = repository.DBFrom(ctx, s.store).Model(&models.Device{}).
-		Where("service_provider_id = ? AND device_uuid = ? AND user_id IS NULL AND status_id = ?", spID, info.DeviceUUID, pendingID).
-		Limit(1).Pluck("id", &ids).Error
-	if err != nil {
-		return nil, fmt.Errorf("device: loading pending device: %w", err)
-	}
-
-	if len(ids) > 0 {
-		info.ID = ids[0]
-		info.StatusID = pendingID
-		if _, err := s.Update(ctx, repository.QueryOptions{Filters: []repository.Filter{repository.Eq("id", info.ID)}}, map[string]interface{}{
-			"device_name":  info.DeviceName,
-			"device_type":  info.DeviceType,
-			"os_name":      info.OSName,
-			"os_version":   info.OSVersion,
-			"app_version":  info.AppVersion,
-			"ip_address":   info.IPAddress,
-			"user_agent":   info.UserAgent,
-			"last_seen_at": info.LastSeenAt,
-		}); err != nil {
-			return nil, fmt.Errorf("device: updating pending device: %w", err)
-		}
-		return &info, nil
-	}
-
-	device, err := info.NewDevice(pendingID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.Create(ctx, device); err != nil {
-		return nil, fmt.Errorf("device: creating pending device: %w", err)
-	}
-	return device, nil
+	return &info, nil
 }

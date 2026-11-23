@@ -12,7 +12,7 @@ import (
 
 // Response is the single envelope every endpoint returns, success or error:
 //
-//	{"code": 0, "message": "Success", "data": {...}}
+//	{"code": 2000, "message": "Success", "data": {...}}
 //	{"code": 1000, "message": "Service Provider Id Header is required", "data": null}
 type Response struct {
 	Code    int    `json:"code"`
@@ -30,7 +30,7 @@ var httpStatusByKind = map[models.ErrorKind]int{
 	models.KindInternal:    http.StatusInternalServerError,
 }
 
-// WriteSuccess writes data in the success envelope (code 0).
+// WriteSuccess writes data in the success envelope (code 2000).
 func WriteSuccess(w http.ResponseWriter, status int, data any) {
 	writeEnvelope(w, status, Response{Code: models.CodeSuccess.Code, Message: models.CodeSuccess.Message, Data: data})
 }

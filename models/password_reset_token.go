@@ -13,7 +13,7 @@ type PasswordResetToken struct {
 	ServiceProviderID uuid.UUID        `gorm:"column:service_provider_id;type:uuid;not null" json:"service_provider_id"`
 	ServiceProvider   *ServiceProvider `gorm:"foreignKey:ServiceProviderID;references:ID;constraint:OnDelete:CASCADE" json:"service_provider,omitempty"`
 
-	UserID uuid.UUID `gorm:"column:user_id;type:uuid;not null;index:idx_password_reset_tokens_user" json:"user_id"`
+	UserID uuid.UUID `gorm:"column:user_id;type:uuid;not null" json:"user_id"`
 	User   *User     `gorm:"foreignKey:UserID;references:ID;constraint:OnDelete:CASCADE" json:"user,omitempty"`
 
 	TokenHash string `gorm:"column:token_hash;not null;uniqueIndex" json:"-"`

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"runtime/debug"
 	"strconv"
@@ -40,6 +41,7 @@ type ctxKey int
 const (
 	keyRequestID ctxKey = iota
 	keyAppCtx
+	keyClientIP
 )
 
 var validRequestID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
@@ -108,17 +110,84 @@ func requestGuardMiddleware(rdb *redis.Client, window time.Duration, now func() 
 	}
 }
 
-// recoverMiddleware turns a panic into a logged 500.
+// recoverMiddleware turns a panic into a logged 500. If the handler had
+// already started its response, a second one can't be written: the panic
+// is logged and the connection aborted so the client sees a broken
+// response, not a truncated "success".
 func recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		defer func() {
-			if p := recover(); p != nil {
-				logger.LogError(RequestIDFrom(r), fmt.Sprintf("panic: %v\n%s", p, debug.Stack()))
-				WriteError(w, r, fmt.Errorf("panic: %v", p))
+			p := recover()
+			if p == nil {
+				return
 			}
+			if p == http.ErrAbortHandler {
+				panic(p)
+			}
+			logger.LogError(RequestIDFrom(r), fmt.Sprintf("panic: %v\n%s", p, debug.Stack()))
+			if rec.wroteHeader {
+				panic(http.ErrAbortHandler)
+			}
+			WriteError(w, r, fmt.Errorf("panic: %v", p))
 		}()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(rec, r)
 	})
+}
+
+// clientIPMiddleware resolves the caller's IP once per request. The TCP
+// peer is the client unless it is one of the trusted proxies; then the
+// X-Forwarded-For chain is walked from the right (the entries our own
+// proxies appended) to the first address that is not a trusted proxy.
+// Entries to the left of that are client-supplied and never trusted.
+func clientIPMiddleware(trusted []netip.Prefix) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := resolveClientIP(r, trusted)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), keyClientIP, ip)))
+		})
+	}
+}
+
+func resolveClientIP(r *http.Request, trusted []netip.Prefix) string {
+	peer := peerIP(r.RemoteAddr)
+	addr, err := netip.ParseAddr(peer)
+	if err != nil || !isTrusted(addr, trusted) {
+		return peer
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	client := peer
+	for i := len(hops) - 1; i >= 0; i-- {
+		hop, err := netip.ParseAddr(strings.TrimSpace(hops[i]))
+		if err != nil {
+			// A malformed hop: stop at the last address we could trust.
+			break
+		}
+		hop = hop.Unmap()
+		client = hop.String()
+		if !isTrusted(hop, trusted) {
+			break
+		}
+	}
+	return client
+}
+
+func isTrusted(addr netip.Addr, trusted []netip.Prefix) bool {
+	addr = addr.Unmap()
+	for _, p := range trusted {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func peerIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
 }
 
 // accessLogMiddleware logs one line per request (never bodies: they may
@@ -177,14 +246,14 @@ func RequestIDFrom(r *http.Request) string {
 	return id
 }
 
-// ClientIP is the TCP peer address. X-Forwarded-For is deliberately not
-// trusted: it is client-controlled unless a known proxy sets it.
+// ClientIP is the caller's IP as resolved by the Common middleware (the TCP
+// peer, or the X-Forwarded-For hop just before our trusted proxies). It
+// falls back to the TCP peer outside that middleware.
 func ClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	if ip, ok := r.Context().Value(keyClientIP).(string); ok {
+		return ip
 	}
-	return host
+	return peerIP(r.RemoteAddr)
 }
 
 // deviceMiddleware requires valid X-Device-* headers and puts them on the
@@ -217,10 +286,21 @@ func DeviceHeaders(r *http.Request) models.DeviceFilters {
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
-	s.status = code
+	if !s.wroteHeader {
+		s.status, s.wroteHeader = code, true
+	}
 	s.ResponseWriter.WriteHeader(code)
 }
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	s.wroteHeader = true
+	return s.ResponseWriter.Write(b)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }

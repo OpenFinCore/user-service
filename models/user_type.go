@@ -16,7 +16,7 @@ import (
 // referenced user_type belongs to the same tenant.
 type UserType struct {
 	ID                uuid.UUID        `gorm:"column:id;type:uuid;primaryKey;default:gen_random_uuid();uniqueIndex:uq_user_types_tenant_id,priority:2" json:"id"`
-	ServiceProviderID *uuid.UUID       `gorm:"column:service_provider_id;type:uuid;index:idx_user_types_tenant;uniqueIndex:uq_user_types_tenant_id,priority:1" json:"service_provider_id,omitempty"`
+	ServiceProviderID *uuid.UUID       `gorm:"column:service_provider_id;type:uuid;uniqueIndex:uq_user_types_tenant_id,priority:1" json:"service_provider_id,omitempty"`
 	ServiceProvider   *ServiceProvider `gorm:"foreignKey:ServiceProviderID;references:ID;constraint:OnDelete:CASCADE" json:"service_provider,omitempty"`
 
 	Name        string  `gorm:"column:name;size:64;not null;check:chk_user_type_name,btrim(name) <> ''" json:"name"`

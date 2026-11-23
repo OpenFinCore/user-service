@@ -202,15 +202,18 @@ type RegistrationService struct {
 ### 3.5 service/ — middleware and AuthService
 
 - **MUST** write middleware logic as unexported functions in `service/middleware.go`.
-- **MUST** expose middleware to the router only through `AuthService` methods: `Common` (global), `RequireTenant`, `NotFound`, and later `RequireUser`.
+- **MUST** expose middleware to the router only through `AuthService` methods: `Common` (global), `RequireTenant`, `RequireDevice`, `RateLimit(name, key)`, `NotFound`, and later `RequireUser`.
+- **MUST** attach route middleware with `chain(handler, mw1, mw2, ...)` (router/router.go). Middleware runs in the order listed. Put an IP rate limit first, then tenant/device checks, then limits that need them (`ByDevice`).
+- **MUST** rate limit every public, unauthenticated route by IP and, where a device is known, by device. Limits are named `<route>:<key>` in `service.DefaultRateLimits` and can be overridden under `rateLimits` in config. Keep IP limits generous (CGNAT); per-device and per-phone limits are the tight ones. Limits fail closed (503) if Redis is down.
 - **MUST** build the request's `c.Context` in middleware, once per request:
   - the request guard sets `WithSession(<X-Request-ID>)`;
   - the tenant sets `WithServiceProviderID(id)`;
+  - the device sets `WithDeviceMetaData(device)` (read with `ctx.DeviceMetaData()`, nil when the route has no `RequireDevice`);
   - future authentication sets `WithActorID(id)` and checks permissions.
 
   Handlers read it with `service.AppContext(r)`.
 - **MUST** recover panics and map errors in one place (`service.WriteError`). Unknown errors become code 5000 plus a log line. **MUST NOT** send internal error text to clients.
-- **MUST NOT** trust `X-Forwarded-For` unless a trusted proxy is configured. `ClientIP` uses the TCP peer address.
+- **MUST NOT** trust `X-Forwarded-For` unless the TCP peer is a configured trusted proxy (`http.trustedProxies` / `OFC_HTTP_TRUSTED_PROXIES`). `Common` resolves the client IP once: the peer, or the right-most `X-Forwarded-For` hop that is not a trusted proxy. Read it with `service.ClientIP(r)`.
 
 **Global request guard (`AuthService.Common`)**: every API request must carry two headers.
 
@@ -287,7 +290,8 @@ Every tenant-scoped table has an RLS policy keyed on `current_service_provider_i
 - **MUST** run every read or write of a tenant-scoped table inside `RunInTx`, with `ServiceProviderID` on `ctx`. `BeginTx` applies it with `set_config('app.current_service_provider_id', <id>, true)`. That is `SET LOCAL`, so a pooled connection never carries one tenant into another request.
 - **MUST** also filter by `service_provider_id` explicitly. RLS is the guarantee; the filter keeps the intent visible.
 - **MUST** scope Redis keys by tenant too, for example `otp:{PURPOSE:<tenant>:<recipient>}:device:<device-id>:code`.
-- **MUST** use a non-superuser database role outside local development. Superusers bypass RLS even with `FORCE`. `conf/config.json` connects as `postgres`, which is acceptable only locally.
+- **MUST** run as the dedicated app role (`postgreDataSource.user`, `ofc_app` locally), never the admin role. Superusers and `BYPASSRLS` roles skip RLS even with `FORCE`. The service refuses to start outside development if the app role can bypass RLS. Migrations run as `adminUser` (`ensureAppRole` creates/updates the app role: `NOSUPERUSER NOBYPASSRLS`, CRUD on tables, `SELECT/INSERT` only on the append-only `audit_logs`, no access to its partitions).
+- **MUST** declare secondary indexes only in `repository/postgres/indexes.go` (`secondaryIndexes`), mirroring the schema doc. **MUST NOT** add `index:` tags to models for them: GORM would create a single-column index under the same name first. `reconcileIndexes` rebuilds any index whose definition drifts.
 
 ---
 
@@ -296,7 +300,7 @@ Every tenant-scoped table has an RLS policy keyed on `current_service_provider_i
 **Every** response, success or error, uses one envelope:
 
 ```json
-{ "code": 0, "message": "Success", "data": { "device_id": "…", "expires_at": "…", "resend_after_seconds": 60 } }
+{ "code": 2000, "message": "Success", "data": { "device_id": "…", "expires_at": "…", "resend_after_seconds": 60 } }
 { "code": 1000, "message": "Service Provider Id Header is required", "data": null }
 ```
 
@@ -381,7 +385,7 @@ Every tenant-scoped table has an RLS policy keyed on `current_service_provider_i
 - **MUST** generate codes with `crypto/rand`.
 - **MUST** store codes and tokens only as an HMAC-SHA256 under a server secret, bound to the purpose, tenant, recipient and device. A plain hash of a 6-digit code is brute-forced instantly.
 - **MUST** return a plain OTP only when `stage` is `development` (`config.IsDevelopment()`). In any other stage it is delivered out of band (SMS).
-- **MUST** load secrets from the environment outside development: `OFC_OTP_HASH_SECRET` and `OFC_REDIS_PASSWORD`. The service refuses to start without the OTP secret.
+- **MUST** load secrets from the environment outside development: `OFC_OTP_HASH_SECRET` (>= 32 chars), `OFC_DB_PASSWORD`, `OFC_DB_ADMIN_PASSWORD` (when auto-migrating) and `OFC_REDIS_PASSWORD`. The service refuses to start without them. `stage` defaults to `production` when unset, and the Docker image sets `OFC_STAGE=production`; every setting can be overridden by an `OFC_*` variable (`conf/config.go`, `applyEnv`).
 - **MUST NOT** log codes, passwords, hashes, tokens or secrets. Mask phone numbers in logs and audit payloads (`+92******4567`). Add secret field names to `logger.secretKeys`.
 
 **Logging**
@@ -453,17 +457,18 @@ The request registers the caller's device as a `devices` row with status `PENDIN
 | `handlers/registration_handler.go` | Decodes `models.RequestOTPRequest`, normalizes and validates the phone, reads `service.DeviceHeaders(r)` and validates them, calls `RegistrationService.RequestOTP`, returns 201 via `WriteSuccess` |
 | `models/otp.go` | `RequestOTPRequest` (+ `ValidatePhone`) and `RequestOTPResponse` (incl. `device_id`) |
 | `models/device.go` | `DeviceFilters` (+ `ValidateDevice`) for the device headers; `Device.NewDevice(statusID)` |
-| `service/registration_service.go` | Calls each owning service in turn: `ServiceProviders.GetActiveByID`, `Users.PhoneExists` and `Devices.RegisterPending` (in `RunInTx`), `OTPs.Issue` against the device, `AuditLogs.RecordEvent`, then sends the SMS or, in development, returns the code |
-| `service/devices.go` | `DeviceService.RegisterPending` (linked to `DeviceStatusService`) |
+| `service/registration_service.go` | Calls each owning service in turn: `ServiceProviders.GetActiveByID`, `OTPs.Reserve` first (Redis, before any DB work), then `Users.PhoneExists` and `Devices.RegisterPending` (in `RunInTx`), `OTPs.IssueReserved` against the device, `AuditLogs.RecordEvent`, then sends the SMS or, in development, returns the code |
+| `service/devices.go` | `DeviceService.RegisterPending`: one atomic `INSERT ... ON CONFLICT` on `uq_devices_pending_device`; a BLOCKED/REVOKED pending device is refused (2006) |
 | `service/service_provider_service.go` | `ServiceProviderService.GetActiveByID` (linked to `ServiceProviderStatusService`) |
 | `service/auth_services.go` | `AuditLogService.RecordEvent` / `Record` |
-| `service/otp_service.go` | Generates the code and stores its HMAC in Redis. One Lua script enforces the 60 s cooldown and 5-per-hour cap; `RevokeQuietly` undoes an undelivered code |
+| `service/otp_service.go` | `Reserve` atomically claims the phone's slot (60 s cooldown, 5-per-hour cap): of concurrent requests exactly one wins. `IssueReserved` stores the code's HMAC against the device. `RevokeQuietly` releases an unused/undelivered slot |
 
 ```mermaid
 flowchart TB
-    MW["container.Auth middleware<br/>recover, access log, request guard, tenant"] --> H["RegistrationHandler.RequestOTP<br/>decode JSON, normalize + validate phone,<br/>validate X-Device-* headers"] --> V["RegistrationService.RequestOTP"]
-    V --> TX["RunInTx (tenant RLS)<br/>ServiceProviders.GetActiveByID → found?<br/>Users.PhoneExists → free?<br/>Devices.RegisterPending → PENDING_VERIFICATION, user_id NULL"]
-    TX --> OTP["OTPService.Issue (Redis, atomic)<br/>cooldown? hourly cap? (per phone)<br/>store HMAC against the device, TTL 5 min"]
+    MW["container.Auth middleware<br/>recover, access log, client IP, request guard,<br/>IP rate limit, tenant, device, device rate limit"] --> H["RegistrationHandler.RequestOTP<br/>decode JSON, normalize + validate phone,<br/>device from AppContext"] --> V["RegistrationService.RequestOTP"]
+    V --> RS["OTPService.Reserve (Redis, atomic, before any DB work)<br/>cooldown? hourly cap? (per phone) → 429"]
+    RS --> TX["RunInTx (tenant RLS)<br/>ServiceProviders.GetActiveByID → found?<br/>Users.PhoneExists → free?<br/>Devices.RegisterPending → PENDING_VERIFICATION, user_id NULL"]
+    TX --> OTP["OTPService.IssueReserved<br/>store HMAC against the device, TTL 5 min"]
     OTP --> AU["AuditLogs.RecordEvent<br/>registration.otp_requested, phone masked, resource = device"]
     AU -->|development| DEV["201 with otp in body"]
     AU -->|other stages| SMS["SMS send → 201<br/>failure → OTPs.RevokeQuietly → 503"]
@@ -471,13 +476,15 @@ flowchart TB
 
 | Outcome | HTTP | Code |
 | --- | --- | --- |
-| Code issued: `data` = `{device_id, expires_at, resend_after_seconds, otp?}` (`otp` only in development) | 201 | 0 |
+| Code issued: `data` = `{device_id, expires_at, resend_after_seconds, otp?}` (`otp` only in development) | 201 | 2000 |
+| Too many requests from this IP / device (`Retry-After` set) | 429 | 1016 |
+| Device is blocked or revoked | 403 | 2006 |
 | Missing/invalid request id or timestamp, timestamp outside window | 400 | 1002–1006 |
 | Same request id + timestamp replayed | 409 | 1007 |
 | Missing/invalid tenant header | 400 | 1000 / 1001 |
 | Missing/invalid device headers | 400 | 1011–1015 |
 | Bad body, missing/invalid phone | 400 | 1008 / 1009 / 1100 / 1101 |
-| Unknown or inactive tenant | 404 | 2000 |
+| Unknown or inactive tenant | 404 | 2005 |
 | Phone already registered | 409 | 2001 |
 | Cooldown or hourly cap | 429 + `Retry-After` | 2002 / 2003 |
 | SMS delivery failed | 503 | 2004 |
@@ -519,7 +526,10 @@ Built:
 - [x] Response envelope + numeric response-code catalog; `AppError`
 - [x] `middleware.go` + `AuthService`; global request guard (mandatory `X-Request-ID` + `X-Timestamp`, Redis duplicate rejection)
 - [x] `router/` + `handlers/`; HTTP server with graceful shutdown in `main.go`
-- [x] `POST /v1/users/register/request`
+- [x] `POST /v1/users/register-request`
+- [x] Route-level middleware via `chain`: `RequireDevice`, Redis rate limits (`RateLimit`), trusted-proxy client IP
+- [x] Dedicated app DB role with RLS enforced; admin role only for migrations; index reconciliation; monthly audit partitions
+- [x] Readiness probe `GET /readyz` (Postgres + Redis); bounded pool, statement timeout, bounded startup retries
 - [x] Shared operations live on their owning services: `ServiceProviderService.GetActiveByID`/`CreateActive`, `AuditLogService.RecordEvent`, `OTPService.RevokeQuietly`
 - [x] Development stage auto-creates the dev tenant on startup (skipped if it exists)
 

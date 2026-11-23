@@ -229,11 +229,54 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(service_provider_
 
 CREATE TABLE IF NOT EXISTS audit_logs_default PARTITION OF audit_logs DEFAULT;
 
+-- ensure_audit_log_partitions creates one partition per month, from the
+-- oldest month still sitting in the default partition (or this month) up to
+-- months_ahead months from now. Rows already in the default partition for
+-- a new month are moved into it, keeping their ids. Run on every migration;
+-- months that fall past the horizon land in the default partition and are
+-- moved on the next run.
+CREATE OR REPLACE FUNCTION ensure_audit_log_partitions(months_ahead INT)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    m       DATE;
+    last_m  DATE := (date_trunc('month', now()) + make_interval(months => months_ahead))::date;
+    part    TEXT;
+BEGIN
+    SELECT LEAST(
+        COALESCE(date_trunc('month', min(created_at))::date, date_trunc('month', now())::date),
+        date_trunc('month', now())::date
+    ) INTO m FROM audit_logs_default;
+
+    WHILE m <= last_m LOOP
+        part := format('audit_logs_%s', to_char(m, 'YYYY_MM'));
+        IF to_regclass(part) IS NULL THEN
+            CREATE TEMP TABLE _audit_move ON COMMIT DROP AS
+                SELECT * FROM audit_logs_default
+                WHERE created_at >= m AND created_at < (m + INTERVAL '1 month');
+            DELETE FROM audit_logs_default
+                WHERE created_at >= m AND created_at < (m + INTERVAL '1 month');
+            EXECUTE format(
+                'CREATE TABLE %I PARTITION OF audit_logs FOR VALUES FROM (%L) TO (%L)',
+                part, m, (m + INTERVAL '1 month')::date
+            );
+            INSERT INTO audit_logs OVERRIDING SYSTEM VALUE SELECT * FROM _audit_move;
+            DROP TABLE _audit_move;
+        END IF;
+        m := (m + INTERVAL '1 month')::date;
+    END LOOP;
+END;
+$$;
+
+SELECT ensure_audit_log_partitions(12);
+
 -- Row-level security: every tenant-owned table only ever shows rows for
--- app.current_service_provider_id (set per-transaction by the API layer
--- once it exists). FORCE means even the table owner is subject to this,
--- so local/manual testing should connect as a superuser (which always
--- bypasses RLS) until that session-variable wiring is built.
+-- app.current_service_provider_id, which BeginTx sets per transaction.
+-- The service connects as a dedicated app role (see ensureAppRole) that is
+-- not a superuser, has NOBYPASSRLS and does not own the tables, so these
+-- policies always apply to it; superusers (the admin/migration role)
+-- bypass RLS even with FORCE.
 ALTER TABLE user_types ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_types FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS p_user_types_isolation ON user_types;

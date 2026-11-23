@@ -3,8 +3,10 @@
 package router
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"ofc-user-service/handlers"
 	"ofc-user-service/models"
@@ -19,6 +21,18 @@ func New(container *service.Container) http.Handler {
 	// no request id / timestamp headers.
 	root.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		service.WriteSuccess(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	// Readiness probe: only route traffic here while Postgres and Redis
+	// answer. Failures are logged, never returned (they may name hosts).
+	root.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := container.Ready(ctx); err != nil {
+			service.WriteError(w, r, models.NewAppError(models.CodeServiceUnavailable).WithCause(err))
+			return
+		}
+		service.WriteSuccess(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
 	root.Handle("/", newAPI(container.Auth, handlers.NewRegistrationHandler(container.Registration)))

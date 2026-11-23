@@ -134,6 +134,82 @@ func (s *OTPService) Issue(ctx c.Context, purpose string, spID uuid.UUID, recipi
 	}
 }
 
+// reserveScript is issueScript without storing a code: it atomically
+// checks the cooldown and hourly cap and, if allowed, starts the cooldown
+// and counts the code. Returns {status, wait_ms} like issueScript.
+var reserveScript = redis.NewScript(`
+local wait = redis.call('PTTL', KEYS[1])
+if wait > 0 then
+  return {1, wait}
+end
+local issued = tonumber(redis.call('GET', KEYS[2]) or '0')
+if issued >= tonumber(ARGV[2]) then
+  return {2, redis.call('PTTL', KEYS[2])}
+end
+redis.call('SET', KEYS[1], 1, 'PX', ARGV[1])
+if redis.call('INCR', KEYS[2]) == 1 then
+  redis.call('PEXPIRE', KEYS[2], 3600000)
+end
+return {0, 0}
+`)
+
+// storeScript replaces the code held against one device.
+var storeScript = redis.NewScript(`
+redis.call('DEL', KEYS[1])
+redis.call('HSET', KEYS[1], 'code_hash', ARGV[1], 'attempts', 0, 'max_attempts', ARGV[3], 'created_at', ARGV[4])
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+return 1
+`)
+
+// Reserve claims the right to send recipient a code now: atomically, it
+// rejects while the resend cooldown runs or the hourly cap is reached
+// (RATE_LIMITED AppErrors) and otherwise starts the cooldown and counts the
+// code. Of many concurrent requests for one recipient exactly one wins, so
+// callers reserve BEFORE doing any database work, then IssueReserved once
+// they know the device. A reservation that ends up unused must be released
+// with Revoke / RevokeQuietly.
+func (s *OTPService) Reserve(ctx c.Context, purpose string, spID uuid.UUID, recipient string) error {
+	keys := s.keys(purpose, spID, recipient, uuid.Nil)
+	res, err := reserveScript.Run(stdContext(ctx), s.redis, keys[1:],
+		s.policy.ResendCooldown.Milliseconds(),
+		s.policy.MaxRequestsPerHour,
+	).Int64Slice()
+	if err != nil {
+		return fmt.Errorf("otp: reserving: %w", err)
+	}
+	switch status, wait := res[0], time.Duration(res[1])*time.Millisecond; status {
+	case 0:
+		return nil
+	case 1:
+		return models.NewAppError(models.CodeOTPResendCooldown).WithRetryAfter(roundUpToSecond(wait))
+	case 2:
+		return models.NewAppError(models.CodeOTPHourlyLimit).WithRetryAfter(roundUpToSecond(wait))
+	default:
+		return fmt.Errorf("otp: unexpected reserve status %d", status)
+	}
+}
+
+// IssueReserved generates a code for a recipient previously Reserved and
+// stores its hash against deviceID. It does not check the limits again:
+// the reservation already counted this code.
+func (s *OTPService) IssueReserved(ctx c.Context, purpose string, spID uuid.UUID, recipient string, deviceID uuid.UUID) (*IssuedOTP, error) {
+	code, err := generateNumericCode(s.policy.Length)
+	if err != nil {
+		return nil, fmt.Errorf("otp: generating code: %w", err)
+	}
+	now := s.now().UTC()
+	keys := s.keys(purpose, spID, recipient, deviceID)
+	if err := storeScript.Run(stdContext(ctx), s.redis, keys[:1],
+		s.hash(purpose, spID, recipient, deviceID, code),
+		s.policy.TTL.Milliseconds(),
+		s.policy.MaxVerifyAttempts,
+		now.Unix(),
+	).Err(); err != nil {
+		return nil, fmt.Errorf("otp: storing code: %w", err)
+	}
+	return &IssuedOTP{Code: code, ExpiresAt: now.Add(s.policy.TTL), ResendAfter: s.policy.ResendCooldown}, nil
+}
+
 // Revoke drops the code held against deviceID and releases the
 // recipient's cooldown and hourly-cap slot. Used when the code could not be
 // delivered.

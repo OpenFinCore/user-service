@@ -14,10 +14,10 @@ var catalog = []models.ResponseCode{
 	models.CodeTimestampHeaderRequired, models.CodeTimestampHeaderInvalid, models.CodeTimestampOutOfWindow,
 	models.CodeDuplicateRequest, models.CodeInvalidRequestBody, models.CodeRequestBodyTooLarge, models.CodeRouteNotFound,
 	models.CodeDeviceIDHeaderRequired, models.CodeDeviceIDHeaderInvalid, models.CodeDeviceTypeHeaderRequired,
-	models.CodeDeviceTypeHeaderInvalid, models.CodeDeviceHeaderTooLong,
+	models.CodeDeviceTypeHeaderInvalid, models.CodeDeviceHeaderTooLong, models.CodeTooManyRequests,
 	models.CodePhoneNumberRequired, models.CodePhoneNumberInvalid,
 	models.CodeServiceProviderNotFound, models.CodePhoneAlreadyRegistered,
-	models.CodeOTPResendCooldown, models.CodeOTPHourlyLimit, models.CodeOTPDeliveryFailed,
+	models.CodeOTPResendCooldown, models.CodeOTPHourlyLimit, models.CodeOTPDeliveryFailed, models.CodeDeviceNotAllowed,
 	models.CodeInternal, models.CodeServiceUnavailable,
 }
 
@@ -29,8 +29,8 @@ func TestResponseCodes_Unique(t *testing.T) {
 		}
 		seen[rc.Code] = rc.Message
 	}
-	if models.CodeSuccess.Code != 0 {
-		t.Fatalf("success must be code 0, got %d", models.CodeSuccess.Code)
+	if models.CodeSuccess.Code != 2000 {
+		t.Fatalf("success must be code 2000, got %d", models.CodeSuccess.Code)
 	}
 }
 

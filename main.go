@@ -23,7 +23,7 @@ func main() {
 	container := service.NewServiceContainer()
 	config := conf.GetConfig()
 
-	fmt.Println("========== Database ready, tables migrated & seeded ==========")
+	fmt.Printf("========== Database ready, tables migrated & seeded (stage: %s) ==========\n", config.Stage)
 
 	server := &http.Server{
 		Addr:              config.HTTP.Addr,
@@ -52,4 +52,9 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		logger.LogError("", fmt.Errorf("graceful shutdown failed: %w", err))
 	}
+	// In-flight requests are done: release the pools and flush the logs.
+	if err := container.Close(); err != nil {
+		logger.LogError("", fmt.Errorf("closing connections: %w", err))
+	}
+	_ = container.Log.Sync()
 }

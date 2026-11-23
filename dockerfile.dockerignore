@@ -1,0 +1,9 @@
+# Used by BuildKit for `docker build -f user-service/dockerfile .` (context:
+# the OpenFinCore root). Keep logs, git metadata and local builds out of the
+# image and the build context.
+**/.git
+**/logger/logs
+**/*.exe
+**/*.log
+**/.env
+**/.env.*

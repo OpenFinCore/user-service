@@ -275,3 +275,22 @@ func TestUnknownRoute_ReturnsEnvelope(t *testing.T) {
 	newTestAPI(t, &fakeRegistration{}).ServeHTTP(rec, req)
 	wantCode(t, rec, http.StatusNotFound, models.CodeRouteNotFound)
 }
+
+// The route is rate limited per device (default 10/hour) before the
+// registration service is reached.
+func TestRegisterRequest_RateLimitedPerDevice(t *testing.T) {
+	reg := &fakeRegistration{res: &service.RequestOTPResult{ExpiresAt: time.Now(), ResendAfter: time.Minute}}
+	api, tenant := newTestAPI(t, reg), uuid.NewString()
+	limit := service.DefaultRateLimits["register-request:device"].Limit
+	for i := 0; i < limit; i++ {
+		if rec := post(t, api, tenant, `{"phone_number":"+923001234567"}`); rec.Code != http.StatusCreated {
+			t.Fatalf("request %d: want 201, got %d %s", i+1, rec.Code, rec.Body)
+		}
+	}
+	reg.called = false
+	rec := post(t, api, tenant, `{"phone_number":"+923001234567"}`)
+	wantCode(t, rec, http.StatusTooManyRequests, models.CodeTooManyRequests)
+	if reg.called || rec.Header().Get("Retry-After") == "" {
+		t.Fatal("over-limit request must not reach the service and must carry Retry-After")
+	}
+}

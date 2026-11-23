@@ -52,6 +52,7 @@ var (
 	CodeDeviceTypeHeaderRequired      = ResponseCode{1013, KindValidation, "Device Type Header is required"}
 	CodeDeviceTypeHeaderInvalid       = ResponseCode{1014, KindValidation, "Device Type Header must be one of MOBILE_IOS, MOBILE_ANDROID, WEB, DESKTOP, API_CLIENT"}
 	CodeDeviceHeaderTooLong           = ResponseCode{1015, KindValidation, "Device Name, OS Name, OS Version or App Version Header is too long"}
+	CodeTooManyRequests               = ResponseCode{1016, KindRateLimited, "Too many requests, please try again later"}
 	CodePhoneNumberRequired           = ResponseCode{1100, KindValidation, "Phone Number is required"}
 	CodePhoneNumberInvalid            = ResponseCode{1101, KindValidation, "Phone Number must be in international format, e.g. +923001234567"}
 
@@ -60,6 +61,7 @@ var (
 	CodeOTPResendCooldown       = ResponseCode{2002, KindRateLimited, "Please wait before requesting another code"}
 	CodeOTPHourlyLimit          = ResponseCode{2003, KindRateLimited, "Too many codes requested for this Phone Number, try again later"}
 	CodeOTPDeliveryFailed       = ResponseCode{2004, KindUnavailable, "Could not send the verification code, please try again later"}
+	CodeDeviceNotAllowed        = ResponseCode{2006, KindForbidden, "This device cannot be used to register"}
 
 	CodeInternal           = ResponseCode{5000, KindInternal, "Internal server error"}
 	CodeServiceUnavailable = ResponseCode{5001, KindUnavailable, "Service temporarily unavailable, please try again later"}
