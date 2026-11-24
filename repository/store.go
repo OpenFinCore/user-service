@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+
 	c "ofc-user-service/context"
 	"ofc-user-service/models"
 
@@ -15,15 +17,27 @@ type Store interface {
 	// DB returns the base *gorm.DB (outside of any transaction).
 	DB() *gorm.DB
 
+	// BeginTx opens a transaction. When ctx carries a ServiceProviderID it
+	// is applied to the transaction (SET LOCAL) so row-level security
+	// scopes every query in it to that tenant.
 	BeginTx(ctx c.Context) (c.Context, error)
 	CommitTx(ctx c.Context) error
 	Rollback(ctx c.Context) error
 
-	TryAdvisoryLock(ctx c.Context, id int) (bool, error)
-	AdvisoryUnlock(ctx c.Context, id int) error
+	// AdvisoryXactLock takes a transaction-scoped advisory lock, waiting
+	// (up to a startup-sized timeout) while another instance holds it. It
+	// must be called on a ctx carrying a transaction and is released
+	// automatically on commit/rollback, so it can never leak on a pooled
+	// connection.
+	AdvisoryXactLock(ctx c.Context, id int64) error
 
 	GetSeedRegistryByFileName(ctx c.Context, fileName string) (*models.SeedRegistry, error)
 	UpdateSeedRegistry(ctx c.Context, registry *models.SeedRegistry) error
+
+	// Ping checks the database is reachable (readiness probe).
+	Ping(ctx context.Context) error
+	// Close releases the connection pool (graceful shutdown).
+	Close() error
 }
 
 // DBFrom returns the transaction bound to ctx if there is one, otherwise

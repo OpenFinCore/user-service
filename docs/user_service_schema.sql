@@ -431,6 +431,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_users_active_username
 ON users(service_provider_id, lower(username))
 WHERE username IS NOT NULL AND deleted_at IS NULL;
 
+-- One active account per phone number per tenant (also serves the
+-- registration "is this phone taken" lookup).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_active_phone
+ON users(service_provider_id, phone_number)
+WHERE phone_number IS NOT NULL AND deleted_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(service_provider_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_users_role ON users(service_provider_id, role_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(service_provider_id, status_id) WHERE deleted_at IS NULL;
@@ -507,7 +513,7 @@ CREATE TABLE IF NOT EXISTS devices (
     service_provider_id UUID NOT NULL
                             REFERENCES service_providers(id)
                             ON DELETE CASCADE,
-    user_id             UUID NOT NULL,
+    user_id             UUID,               -- NULL while PENDING_VERIFICATION (before the user exists)
     device_uuid         VARCHAR(128) NOT NULL,
     device_name         VARCHAR(150),
     device_type         VARCHAR(32) NOT NULL,
@@ -548,6 +554,10 @@ END;
 $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_devices_user_device ON devices(service_provider_id, user_id, device_uuid);
+-- At most one pending (not yet linked to a user) row per tenant + device;
+-- the ON CONFLICT target of the pending-device upsert. (NULL user_ids are
+-- distinct in uq_devices_user_device, so it cannot enforce this.)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_devices_pending_device ON devices(service_provider_id, device_uuid) WHERE user_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(service_provider_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(service_provider_id, status_id);
 CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(service_provider_id, last_seen_at);
@@ -778,6 +788,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(service_provider_
 
 
 CREATE TABLE IF NOT EXISTS audit_logs_default PARTITION OF audit_logs DEFAULT;
+
+-- Monthly partitions (audit_logs_YYYY_MM) are created 12 months ahead on
+-- every migration by ensure_audit_log_partitions(12), which also moves any
+-- rows that landed in the default partition into their month. See
+-- repository/postgres/migrations.go.
 
 
 -- ============================================================================

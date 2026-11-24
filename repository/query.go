@@ -267,8 +267,17 @@ func Count[T any](db *gorm.DB, opts QueryOptions) (int64, error) {
 	return count, err
 }
 
-// Exists reports whether any record matches opts.
+// Exists reports whether any record matches opts. It stops at the first
+// match (SELECT 1 ... LIMIT 1) instead of counting every matching row.
 func Exists[T any](db *gorm.DB, opts QueryOptions) (bool, error) {
-	count, err := Count[T](db, opts)
-	return count > 0, err
+	var model T
+	q, err := applyOptions(db.Model(&model), QueryOptions{Filters: opts.Filters, Unscoped: opts.Unscoped})
+	if err != nil {
+		return false, err
+	}
+	var rows []struct{ One int }
+	if err := q.Select("1 AS one").Limit(1).Scan(&rows).Error; err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
 }

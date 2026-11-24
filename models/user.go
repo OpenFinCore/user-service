@@ -15,13 +15,13 @@ import (
 // refresh tokens, password reset tokens) can FK against it per-tenant.
 type User struct {
 	ID                uuid.UUID        `gorm:"column:id;type:uuid;primaryKey;default:gen_random_uuid();uniqueIndex:uq_users_tenant_id,priority:2" json:"id"`
-	ServiceProviderID uuid.UUID        `gorm:"column:service_provider_id;type:uuid;not null;index:idx_users_tenant;uniqueIndex:uq_users_tenant_id,priority:1" json:"service_provider_id"`
+	ServiceProviderID uuid.UUID        `gorm:"column:service_provider_id;type:uuid;not null;uniqueIndex:uq_users_tenant_id,priority:1" json:"service_provider_id"`
 	ServiceProvider   *ServiceProvider `gorm:"foreignKey:ServiceProviderID;references:ID;constraint:OnDelete:CASCADE" json:"service_provider,omitempty"`
 
-	UserTypeID *uuid.UUID `gorm:"column:user_type_id;type:uuid;index:idx_users_type" json:"user_type_id,omitempty"`
+	UserTypeID *uuid.UUID `gorm:"column:user_type_id;type:uuid" json:"user_type_id,omitempty"`
 	UserType   *UserType  `gorm:"foreignKey:UserTypeID;references:ID;constraint:OnDelete:SET NULL" json:"user_type,omitempty"`
 
-	RoleID uuid.UUID `gorm:"column:role_id;type:uuid;not null;index:idx_users_role" json:"role_id"`
+	RoleID uuid.UUID `gorm:"column:role_id;type:uuid;not null" json:"role_id"`
 	Role   *Role     `gorm:"foreignKey:RoleID;references:ID;constraint:OnDelete:RESTRICT" json:"role,omitempty"`
 
 	Username    *string `gorm:"column:username;size:50;check:chk_username_not_blank,username IS NULL OR btrim(username) <> ''" json:"username,omitempty"`
@@ -31,7 +31,7 @@ type User struct {
 	LastName    *string `gorm:"column:last_name;size:100" json:"last_name,omitempty"`
 	ProfileURL  *string `gorm:"column:profile_url;size:500" json:"profile_url,omitempty"`
 
-	CountryID *uuid.UUID `gorm:"column:country_id;type:uuid;index:idx_users_country" json:"country_id,omitempty"`
+	CountryID *uuid.UUID `gorm:"column:country_id;type:uuid" json:"country_id,omitempty"`
 	Country   *Country   `gorm:"foreignKey:CountryID;references:ID;constraint:OnDelete:RESTRICT" json:"country,omitempty"`
 
 	PasswordHash      string     `gorm:"column:password_hash;not null" json:"-"`
@@ -46,12 +46,12 @@ type User struct {
 	TwoFactorStatus          *TwoFactorStatus `gorm:"foreignKey:TwoFactorStatusID;references:ID;constraint:OnDelete:RESTRICT" json:"two_factor_status,omitempty"`
 	TwoFactorSecretEncrypted *string          `gorm:"column:two_factor_secret_encrypted" json:"-"`
 
-	StatusID int16       `gorm:"column:status_id;not null;index:idx_users_status" json:"status_id"`
+	StatusID int16       `gorm:"column:status_id;not null" json:"status_id"`
 	Status   *UserStatus `gorm:"foreignKey:StatusID;references:ID;constraint:OnDelete:RESTRICT" json:"status,omitempty"`
 
 	FailedLoginAttempts int16      `gorm:"column:failed_login_attempts;not null;default:0;check:chk_failed_login_attempts,failed_login_attempts >= 0" json:"failed_login_attempts"`
 	LockedUntil         *time.Time `gorm:"column:locked_until" json:"locked_until,omitempty"`
-	LastLoginAt         *time.Time `gorm:"column:last_login_at;index:idx_users_last_login" json:"last_login_at,omitempty"`
+	LastLoginAt         *time.Time `gorm:"column:last_login_at" json:"last_login_at,omitempty"`
 	LastLoginIP         *net.IP    `gorm:"column:last_login_ip;type:inet" json:"last_login_ip,omitempty"`
 
 	CreatedBy *uuid.UUID `gorm:"column:created_by;type:uuid" json:"created_by,omitempty"`

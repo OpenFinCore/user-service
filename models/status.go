@@ -54,3 +54,18 @@ type RefreshTokenStatus struct {
 type PasswordResetTokenStatus struct {
 	StatusBase `gorm:"embedded"`
 }
+
+// StatusID exposes the id of any status row generically (it is promoted to
+// every type embedding StatusBase).
+func (s StatusBase) StatusID() int16 { return s.ID }
+
+// Seeded status names referenced from code. Status ids are assigned by the
+// seeder and differ per database - always resolve them by name
+// (StatusLookup.IDByName), never hard-code the numbers.
+const (
+	ServiceProviderStatusActive = "ACTIVE"
+
+	UserStatusActive = "ACTIVE"
+
+	DeviceStatusPendingVerification = "PENDING_VERIFICATION"
+)

@@ -36,13 +36,14 @@ func LoggerInit(conf LoggerConfig) *zap.Logger {
 	var syncers []zapcore.WriteSyncer
 
 	// Always log to Stdout (for PM2 and Docker capture)
-	syncers = append(syncers, zapcore.AddSync(os.Stdout))
+	// zapcore.Lock serialises writes; zap itself does not.
+	syncers = append(syncers, zapcore.Lock(os.Stdout))
 
-	// File rotation (only if path and name are provided in config)
+	// File rotation (only if path and name are provided in config). The
+	// writer locks internally and implements Sync.
 	if conf.Path != "" && conf.Name != "" {
 		fileRotationTime := time.Duration(conf.Rotationtime) * time.Minute
-		fileRotation := zapcore.AddSync(NewTimeRotationWriter(conf.Name, conf.Path, fileRotationTime, conf.MaxSize))
-		syncers = append(syncers, fileRotation)
+		syncers = append(syncers, NewTimeRotationWriter(conf.Name, conf.Path, fileRotationTime, conf.MaxSize))
 	}
 
 	// set up zap core configration

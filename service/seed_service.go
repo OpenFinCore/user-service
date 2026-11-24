@@ -41,16 +41,6 @@ const seedAdvisoryLockID = 159159
 func (s *seedsService) SeedAll() (err error) {
 	ctx := c.NewContext(context.Background())
 
-	acquired, err := s.store.TryAdvisoryLock(ctx, seedAdvisoryLockID)
-	if err != nil {
-		return fmt.Errorf("seed: acquiring advisory lock: %w", err)
-	}
-	if !acquired {
-		logger.LogInfo("Seeding already in progress on another instance, skipping.", "")
-		return nil
-	}
-	defer s.store.AdvisoryUnlock(ctx, seedAdvisoryLockID)
-
 	ctx, err = s.store.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -60,6 +50,13 @@ func (s *seedsService) SeedAll() (err error) {
 			_ = s.store.Rollback(ctx)
 		}
 	}()
+
+	// Instances starting together seed one at a time: the others wait here,
+	// then find every file unchanged in the seed registry and skip it. The
+	// lock is released with the transaction.
+	if err = s.store.AdvisoryXactLock(ctx, seedAdvisoryLockID); err != nil {
+		return fmt.Errorf("seed: acquiring advisory lock: %w", err)
+	}
 
 	dir := s.conf.SeedData.Dir
 
