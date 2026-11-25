@@ -35,7 +35,7 @@ func New(container *service.Container) http.Handler {
 		service.WriteSuccess(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
-	root.Handle("/", newAPI(container.Auth, handlers.NewRegistrationHandler(container.Registration)))
+	root.Handle("/", newAPI(container.Auth, handlers.NewRegistrationHandler(container.Registration, container.Config)))
 	return root
 }
 

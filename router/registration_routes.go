@@ -19,4 +19,11 @@ func registerRegistrationRoutes(mux *http.ServeMux, auth *service.AuthService, h
 		auth.RequireDevice,
 		auth.RateLimit("register-request:device", service.ByDevice),
 	))
+
+	mux.Handle(fmt.Sprintf("POST %s/register-confirm", urlPrefix), chain(h.ConfirmRegistration,
+		auth.RateLimit("register-confirm:ip", service.ByClientIP),
+		auth.RequireTenant,
+		auth.RequireDevice,
+		auth.RateLimit("register-confirm:device", service.ByDevice),
+	))
 }

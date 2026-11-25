@@ -8,6 +8,7 @@ import (
 
 type RequestOTPRequest struct {
 	PhoneNumber string `json:"phone_number" binding:"required"`
+	Otp         string `json:"otp,omitempty"`
 }
 
 func (s *RequestOTPRequest) ValidatePhone() error {
@@ -16,6 +17,19 @@ func (s *RequestOTPRequest) ValidatePhone() error {
 		return NewAppError(CodePhoneNumberRequired)
 	case !E164.MatchString(s.PhoneNumber):
 		return NewAppError(CodePhoneNumberInvalid)
+	}
+	return nil
+}
+func (s *RequestOTPRequest) ValidatePhoneAndOtp(otpLen int) error {
+	switch {
+	case s.PhoneNumber == "":
+		return NewAppError(CodePhoneNumberRequired)
+	case !E164.MatchString(s.PhoneNumber):
+		return NewAppError(CodePhoneNumberInvalid)
+	case s.Otp == "":
+		return NewAppError(CodeOtpRequired)
+	case len(s.Otp) != otpLen:
+		return NewAppError(CodeOtpInvalid)
 	}
 	return nil
 }
@@ -28,4 +42,9 @@ type RequestOTPResponse struct {
 	DeviceID uuid.UUID `json:"device_id"`
 	// OTP is present only in the development stage.
 	OTP *string `json:"otp,omitempty"`
+}
+
+type ConfirmOTPResponse struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	Token     string    `json:"token"`
 }

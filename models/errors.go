@@ -55,6 +55,8 @@ var (
 	CodeTooManyRequests               = ResponseCode{1016, KindRateLimited, "Too many requests, please try again later"}
 	CodePhoneNumberRequired           = ResponseCode{1100, KindValidation, "Phone Number is required"}
 	CodePhoneNumberInvalid            = ResponseCode{1101, KindValidation, "Phone Number must be in international format, e.g. +923001234567"}
+	CodeOtpRequired                   = ResponseCode{1102, KindValidation, "OTP is required"}
+	CodeOtpInvalid                    = ResponseCode{1103, KindValidation, "OTP must be exactly the configured length"}
 
 	CodeServiceProviderNotFound = ResponseCode{2005, KindNotFound, "Service Provider not found"}
 	CodePhoneAlreadyRegistered  = ResponseCode{2001, KindConflict, "Phone Number is already registered"}
@@ -62,9 +64,8 @@ var (
 	CodeOTPHourlyLimit          = ResponseCode{2003, KindRateLimited, "Too many codes requested for this Phone Number, try again later"}
 	CodeOTPDeliveryFailed       = ResponseCode{2004, KindUnavailable, "Could not send the verification code, please try again later"}
 	CodeDeviceNotAllowed        = ResponseCode{2006, KindForbidden, "This device cannot be used to register"}
-
-	CodeInternal           = ResponseCode{5000, KindInternal, "Internal server error"}
-	CodeServiceUnavailable = ResponseCode{5001, KindUnavailable, "Service temporarily unavailable, please try again later"}
+	CodeInternal                = ResponseCode{5000, KindInternal, "Internal server error"}
+	CodeServiceUnavailable      = ResponseCode{5001, KindUnavailable, "Service temporarily unavailable, please try again later"}
 )
 
 // AppError is a client-safe error returned by services: its ResponseCode,

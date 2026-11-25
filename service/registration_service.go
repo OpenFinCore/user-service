@@ -30,6 +30,14 @@ type RequestOTPResult struct {
 	Code *string
 }
 
+type ConfirmOtpInput struct {
+	PhoneNumber string
+	OTP         string
+	// IPAddress and UserAgent describe the caller, for the audit trail.
+	IPAddress string
+	UserAgent string
+}
+
 // The capabilities RegistrationService uses from the services it is linked
 // to. The concrete services satisfy them; tests substitute fakes.
 type (
@@ -201,4 +209,16 @@ func deviceFromInput(d models.DeviceFilters, in RequestOTPInput) models.Device {
 		IPAddress:  utils.ParseIP(in.IPAddress),
 		UserAgent:  utils.OptionalString(utils.Truncate(strings.TrimSpace(in.UserAgent), 512)),
 	}
+}
+
+type ConfirmOtpResponse struct {
+	ExpiresAt time.Time
+	// Token is the JWT for the newly registered user. It is set only in the
+	// final step of registration, after the user has been created.
+	Token *string
+}
+
+func (s *RegistrationService) ConfirmRegistration(ctx c.Context, in ConfirmOtpInput) (*ConfirmOtpResponse, error) {
+
+	return nil, nil
 }

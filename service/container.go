@@ -21,9 +21,10 @@ import (
 // lookup-table seeders once at startup. It has no HTTP/API surface -
 // consumers (future controllers, jobs, tests) reach into it directly.
 type Container struct {
-	Store repository.Store
-	Redis *redis.Client
-	Log   *zap.Logger
+	Store  repository.Store
+	Redis  *redis.Client
+	Log    *zap.Logger
+	Config *conf.Config
 
 	ServiceProviderStatuses    *ServiceProviderStatusService
 	UserTypeStatuses           *UserTypeStatusService
@@ -65,8 +66,9 @@ func NewServiceContainer() *Container {
 	deviceStatuses := NewDeviceStatusService(store)
 
 	container := &Container{
-		Store: store,
-		Log:   log,
+		Store:  store,
+		Log:    log,
+		Config: config,
 
 		ServiceProviderStatuses:    serviceProviderStatuses,
 		UserTypeStatuses:           NewUserTypeStatusService(store),
